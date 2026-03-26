@@ -1,7 +1,7 @@
 # 기술 스택 결정서
 # mvp-builder
 
-> 작성일: 2026-03-17
+> 작성일: 2026-03-17 (수정: 2026-03-26)
 > 작성자: Architecture Agent (3단계)
 > 기반 문서: `docs/constitution.md`, `docs/PRD.md`, `docs/MVP-scope.md`
 
@@ -20,9 +20,9 @@
 | 메시지 큐 | BullMQ | [결정] |
 | AI 연동 | Claude Agent SDK (Anthropic) | [결정] |
 | 실시간 통신 | SSE (Server-Sent Events) | [결정] |
-| 이메일 발송 | Nodemailer + Gmail SMTP | [결정] |
-| 외부 연동 | GitHub REST API v3 | [결정] |
-| 인증 방식 | JWT (Access 15분) + Refresh Token (7일, DB 저장) | [결정] |
+| 외부 연동 | GitHub REST API v3, GitHub OAuth API | [결정] |
+| 인증 방식 | GitHub OAuth 2.0 + JWT (Access Token 15분) | [결정] |
+| 암호화 | AES-256 (GitHub OAuth token 암호화 저장) | [결정] |
 | 배포 환경 | AWS + Docker (multi-stage build) | [결정] |
 | CI/CD | GitHub Actions | [결정] |
 | 테스트 | Jest + Supertest (Backend) / Vitest + Playwright (Frontend/E2E) | [결정] |
@@ -71,16 +71,18 @@
 
 | 항목 | 선택 | 선택 이유 |
 |------|------|----------|
-| 인증 방식 | JWT (Access Token) + DB 저장 Refresh Token | C-SEC-02, C-SEC-03. Access Token 15분 만료. Refresh Token 7일 만료. Rotation 정책 적용. |
+| 인증 방식 | GitHub OAuth 2.0 + JWT (Access Token 15분) | GitHub 계정으로 원클릭 로그인. 별도 이메일/비밀번호 없음. |
+| OAuth 라이브러리 | @nestjs/passport + passport-github2 | NestJS 공식 Passport 통합. GitHub OAuth 2.0 전략. |
 | JWT 라이브러리 | @nestjs/jwt + passport-jwt | NestJS 공식 지원. `AuthGuard` 통합. |
-| 이메일 발송 | Nodemailer + Gmail SMTP | [결정]. 초기 비용 없이 이메일 인증 메일 발송. 운영자 Gmail 계정 사용. |
+| 암호화 | Node.js crypto (AES-256-GCM) | GitHub OAuth token 암호화 저장. 복호화 키는 환경변수. |
 
 ### 2.5 외부 연동
 
 | 항목 | 선택 | 선택 이유 |
 |------|------|----------|
-| GitHub 연동 | GitHub REST API v3 (@octokit/rest) | [결정]. 운영자 소유 GitHub token으로 공개 repo 자동 생성. repo명: `mvp-{keyword}-{username}` |
-| Claude AI | @anthropic-ai/sdk (Claude Agent SDK) | [결정]. 생성 파이프라인(분석 → 문서화 → 개발 → 테스트) 실행. 운영자 API key 환경 변수 관리. |
+| GitHub OAuth | GitHub OAuth API + passport-github2 | [결정]. 사용자 인증 및 repo 생성 권한 획득. |
+| GitHub 연동 | GitHub REST API v3 (@octokit/rest) | [결정]. 사용자 OAuth token으로 사용자 계정에 공개 repo 자동 생성. repo명: `mvp-{keyword}-{username}` |
+| Claude AI | @anthropic-ai/sdk (Claude Agent SDK) | [결정]. 생성 파이프라인(분석 → 피드백 대기 → 개발 → 테스트) 실행. MVP는 운영자 API key, 이후 BYOK 지원 예정. |
 
 ### 2.6 인프라 / 배포
 
@@ -149,14 +151,6 @@
 | MongoDB | 미선택 | 관계형 데이터(USER-GENERATION 관계)에 부적합. |
 | Supabase | 미선택 | 플랫폼 종속. 경쟁사 분석에서 종속 문제 명시됨. |
 
-### 이메일 발송
-
-| 후보 | 선택 여부 | 미선택 이유 |
-|------|----------|------------|
-| **Nodemailer + Gmail SMTP** | 선택 | [결정]. 초기 비용 없음. 운영자 계정 즉시 활용. |
-| SendGrid | 미선택 | 무료 플랜 한도 제한. 추가 서비스 의존. |
-| AWS SES | 미선택 | 설정 복잡도. MVP 초기에 과도한 인프라. |
-
 ---
 
 ## 4. repo 네이밍 규칙 상세
@@ -201,15 +195,13 @@ mvp-builder/
 | `DATABASE_URL` | PostgreSQL 연결 문자열 | 전체 |
 | `REDIS_URL` | Redis 연결 문자열 | 전체 |
 | `JWT_SECRET` | JWT 서명 키 | 전체 |
-| `JWT_REFRESH_SECRET` | Refresh Token 서명 키 | 전체 |
-| `ANTHROPIC_API_KEY` | Claude API key (운영자 소유) | 전체 |
-| `GITHUB_TOKEN` | GitHub Personal Access Token (운영자 소유, repo 생성 권한) | 전체 |
-| `GITHUB_OWNER` | 생성 repo 소유자 (운영자 GitHub 계정명) | 전체 |
-| `GMAIL_USER` | 이메일 발송 계정 | 전체 |
-| `GMAIL_APP_PASSWORD` | Gmail 앱 비밀번호 | 전체 |
-| `APP_URL` | 서비스 URL (이메일 인증 링크용) | 전체 |
-| `PORT` | NestJS 서버 포트 | 전체 |
 | `JWT_EXPIRES_IN` | Access Token 만료 시간 (예: `15m`) | 전체 |
-| `JWT_REFRESH_EXPIRES_IN` | Refresh Token 만료 시간 (예: `7d`) | 전체 |
-| `FRONTEND_URL` | Frontend URL (CORS 허용 Origin) | 전체 |
+| `ANTHROPIC_API_KEY` | Claude API key (운영자 소유, MVP용) | 전체 |
+| `GITHUB_CLIENT_ID` | GitHub OAuth App Client ID | 전체 |
+| `GITHUB_CLIENT_SECRET` | GitHub OAuth App Client Secret | 전체 |
+| `GITHUB_OAUTH_CALLBACK_URL` | GitHub OAuth 콜백 URL | 전체 |
+| `ENCRYPTION_KEY` | GitHub OAuth token AES-256 암호화 키 (32바이트) | 전체 |
+| `APP_URL` | 서비스 URL | 전체 |
+| `FRONTEND_URL` | Frontend URL (CORS 허용 Origin, OAuth 리다이렉트 대상) | 전체 |
+| `PORT` | NestJS 서버 포트 | 전체 |
 | `NODE_ENV` | `development` / `production` | 전체 |

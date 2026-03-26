@@ -16,7 +16,7 @@
 
 | ID | 키워드 | 설명 |
 |----|--------|------|
-| C-VAL-01 | **Accessibility** | 개발 경험이 없는 사용자도 MVP를 생성할 수 있어야 한다. 개발자에게는 세밀한 제어 옵션을 제공한다. |
+| C-VAL-01 | **Developer Control** | 개발자가 기술 스택, 아키텍처, 배포 방식을 직접 지정할 수 있어야 한다. 개발자에게 세밀한 제어 옵션을 제공한다. |
 | C-VAL-02 | **Transparency** | AI 에이전트의 작업 진행 상황을 실시간으로 사용자에게 노출한다. 블랙박스 처리를 금지한다. |
 | C-VAL-03 | **Reliability** | 생성된 코드는 실행 가능한 상태여야 한다. 에러 없이 clone → install → run이 보장되어야 한다. |
 | C-VAL-04 | **Simplicity** | 핵심 흐름(요구사항 입력 → 생성 → clone URL 수령)은 최소한의 단계로 완결되어야 한다. |
@@ -34,7 +34,7 @@
 | 실시간 통신 | SSE (Server-Sent Events) |
 | 외부 연동 | GitHub API (자동 repo 생성) |
 | 배포 | AWS + Docker |
-| 인증 | 이메일 기반 회원가입/로그인 |
+| 인증 | GitHub OAuth 2.0 |
 
 ---
 
@@ -86,7 +86,7 @@
 ### 테스트 필수 대상
 
 - **C-TEST-01** 모든 API 엔드포인트에 대한 통합 테스트를 작성한다. (성공/실패 케이스 포함)
-- **C-TEST-02** 인증 흐름 전체 (회원가입 → 이메일 인증 → 로그인 → 토큰 갱신 → 로그아웃)
+- **C-TEST-02** 인증 흐름 전체 (GitHub OAuth 로그인 → JWT 발급 → 인증 필요 API 접근 → 로그아웃)
 - **C-TEST-03** MVP 생성 파이프라인의 각 단계별 서비스 로직
 - **C-TEST-04** GitHub API 연동 서비스 (repo 생성, 파일 커밋, clone URL 반환)
 - **C-TEST-05** SSE 이벤트 발행 로직 (진행 상태, 에러 상태 포함)
@@ -98,13 +98,13 @@
 
 ### E2E 핵심 시나리오
 
-- **C-TEST-08** 비개발자 시나리오: 자연어 입력 → 생성 → clone URL 수령
-- **C-TEST-09** 개발자 시나리오: 자연어 입력 + 기술 스택/아키텍처 선택 → 생성 → clone URL 수령
+- **C-TEST-08** 기본 시나리오: GitHub OAuth 로그인 → 자연어 입력 → 분석 문서 확인 → 승인 → 생성 → clone URL 수령
+- **C-TEST-09** 개발자 옵션 시나리오: 자연어 입력 + 기술 스택/아키텍처 선택 → 분석 문서 확인 → 피드백 제출 → 생성 → clone URL 수령
 - **C-TEST-10** 에러 시나리오: 생성 중 실패 → 에러 메시지 표시 → 재시도
 
 ### 모킹 원칙
 
-- **C-TEST-11** 외부 서비스(Claude API, GitHub API, 이메일 서비스)는 반드시 모킹한다.
+- **C-TEST-11** 외부 서비스(Claude API, GitHub API, GitHub OAuth)는 반드시 모킹한다.
 - **C-TEST-12** 통합 테스트에서 DB는 실제 테스트 DB 인스턴스를 사용한다. 인메모리 DB(SQLite)로 대체 가능하다.
 - **C-TEST-13** SSE 스트림 테스트는 EventSource를 모킹하여 단위 테스트한다.
 
@@ -114,21 +114,16 @@
 
 ### 인증/인가
 
-- **C-SEC-01** [결정] 이메일 기반 회원가입/로그인을 사용한다.
+- **C-SEC-01** [결정] GitHub OAuth 2.0을 단일 인증 수단으로 사용한다. 이메일/비밀번호 기반 인증은 사용하지 않는다.
 - **C-SEC-02** Access Token은 JWT로 발급하며 만료 시간은 15분으로 설정한다.
-- **C-SEC-03** Refresh Token은 DB에 저장하며 만료 시간은 7일로 설정한다.
+- **C-SEC-03** GitHub OAuth 로그인 시 발급된 GitHub access token은 AES-256-GCM으로 암호화하여 DB에 저장한다. 복호화 키는 환경 변수로만 관리한다.
 - **C-SEC-04** 모든 인증이 필요한 API는 NestJS `AuthGuard`로 보호한다.
-- **C-SEC-05** 비밀번호는 bcrypt(salt rounds: 12)로 해싱하여 저장한다. 평문 저장을 금지한다.
-
-> 가정: 이메일 인증(회원가입 시 이메일 확인)을 포함한다. 인증 전 API 접근은 제한된다.
 
 ### 민감 데이터 처리
 
 - **C-SEC-06** 사용자 비밀번호, JWT secret, GitHub token, Claude API key는 절대 로그에 기록하지 않는다.
 - **C-SEC-07** API 응답에 비밀번호 해시를 포함하지 않는다. DTO에서 명시적으로 제외한다.
-- **C-SEC-08** [결정 변경] GitHub token은 운영자 소유의 서비스 공용 token만 사용하며, 환경 변수(AWS Secrets Manager)로만 관리하고 DB에 저장하지 않는다. 사용자별 GitHub token 등록 기능은 제공하지 않는다.
-
-> ~~가정: 사용자가 자신의 GitHub token을 등록하여 사용한다. 서비스 공용 token은 환경 변수로만 관리한다.~~ (이전 가정은 실제 설계 결정으로 대체됨. 운영자 소유 token을 환경 변수로만 관리하는 방식으로 확정. `system-architecture.md` 5.2절, `erd.md` 참조)
+- **C-SEC-08** [결정] GitHub OAuth를 통해 획득한 사용자의 GitHub access token을 AES-256-GCM으로 암호화하여 DB에 저장한다. 이 token으로 사용자 본인의 GitHub 계정에 repo를 생성한다. (`erd.md`, `tech-stack.md` 참조)
 
 ### 외부 입력 검증
 
@@ -154,7 +149,7 @@
 
 ### 디자인 철학
 
-- **C-UX-01** 비개발자와 개발자 모두를 위한 Progressive Disclosure 전략을 사용한다. 기본 UI는 단순하고, 개발자 옵션은 접어두었다가 펼치는 방식으로 제공한다.
+- **C-UX-01** Progressive Disclosure 전략을 사용한다. 기본 UI는 단순하고, 개발자 옵션(기술 스택, 아키텍처, 배포 방식)은 접어두었다가 펼치는 방식으로 제공한다.
 - **C-UX-02** 핵심 흐름(요구사항 입력 → 생성 → 결과 수령)은 단일 페이지에서 완결된다.
 - **C-UX-03** 생성 진행 상태는 SSE를 통해 실시간으로 표시한다. "처리 중" 스피너만으로는 불충분하다. 현재 단계(분석 중 / 코드 생성 중 / repo 생성 중 등)를 텍스트로 표시한다.
 
@@ -235,11 +230,11 @@
 | 실시간 통신 | SSE | [결정] |
 | GitHub 연동 | GitHub API 자동 repo 생성 | [결정] |
 | 배포 환경 | AWS + Docker | [결정] |
-| 인증 방식 | 이메일 기반 회원가입/로그인 | [결정] |
+| 인증 방식 | GitHub OAuth 2.0 단일 인증 | [결정] |
+| GitHub token 저장 | AES-256-GCM 암호화 후 DB 저장 | [결정] |
 | API rate limiting | 초기 미적용, 추후 결정 | [결정] |
 | 테스트 전략 | Unit / Integration / E2E (3계층) | [결정] |
 | 공유 타입 관리 | 공유 디렉터리 방식 (초기) | 가정 |
-| 이메일 인증 포함 | 회원가입 시 이메일 확인 포함 | 가정 |
 | 생성 큐 | BullMQ + Redis, 사용자당 1건 동시 제한 | 가정 |
 | 로그 수집 | CloudWatch Logs (초기) | 가정 |
 | 스테이징 환경 | AWS 별도 인프라 | 가정 |

@@ -1,7 +1,7 @@
 # 시스템 아키텍처
 # mvp-builder
 
-> 작성일: 2026-03-17
+> 작성일: 2026-03-17 (수정: 2026-03-26)
 > 작성자: Architecture Agent (3단계)
 > 기반 문서: `docs/constitution.md`, `docs/PRD.md`, `docs/MVP-scope.md`, `docs/tech-stack.md`
 
@@ -13,9 +13,9 @@ mvp-builder는 다음 세 영역으로 구성된다.
 
 | 영역 | 역할 |
 |------|------|
-| **Frontend (React SPA)** | 사용자 인터페이스. 요구사항 입력, 생성 진행 상황 실시간 표시, 이력 조회. |
-| **Backend (NestJS API)** | 비즈니스 로직 처리. 인증, 생성 요청 큐잉, SSE 스트리밍, GitHub 연동 조율. |
-| **외부 서비스** | Claude Agent SDK(AI 생성), GitHub API(repo 생성), Gmail SMTP(이메일 인증). |
+| **Frontend (React SPA)** | 사용자 인터페이스. 요구사항 입력, 분석 문서 표시 및 피드백 제출, 생성 진행 상황 실시간 표시, 이력 조회. |
+| **Backend (NestJS API)** | 비즈니스 로직 처리. GitHub OAuth 인증, 생성 요청 큐잉, SSE 스트리밍, GitHub 연동 조율. |
+| **외부 서비스** | Claude Agent SDK(AI 생성), GitHub OAuth API(인증), GitHub REST API(repo 생성). |
 
 ---
 
@@ -25,9 +25,11 @@ mvp-builder는 다음 세 영역으로 구성된다.
 
 | 컴포넌트 | 역할 | 주요 라이브러리 |
 |----------|------|----------------|
-| Auth Pages | 회원가입, 로그인, 이메일 인증 완료 페이지 | React Hook Form, zod |
+| Auth Pages | GitHub OAuth 로그인 버튼, 콜백 처리 | Zustand |
 | Generation Form | 요구사항 입력 + 개발자 옵션(Progressive Disclosure) | Zustand, shadcn/ui |
+| Analysis Viewer | 분석 문서(ERD, API 설계, 아키텍처) 표시 및 피드백 입력 UI | shadcn/ui, React Hook Form |
 | Progress Monitor | SSE 수신 및 단계별 진행률 실시간 표시 | native EventSource |
+| Test Report Viewer | 테스트 리포트(통과/실패/커버리지) 표시 | shadcn/ui |
 | Result Display | clone URL 표시, 복사 버튼 | shadcn/ui |
 | History List | 생성 이력 목록, 상태 필터, clone URL 재확인 | TanStack Query |
 | Auth Store | 로그인 상태, Access Token 관리 | Zustand |
@@ -36,11 +38,11 @@ mvp-builder는 다음 세 영역으로 구성된다.
 
 | 모듈 | 역할 | 주요 의존성 |
 |------|------|-------------|
-| `AuthModule` | 회원가입, 로그인, 이메일 인증, JWT 발급, Refresh Token rotation | @nestjs/jwt, bcrypt, Nodemailer |
+| `AuthModule` | GitHub OAuth 인증, JWT 발급, 사용자 생성/조회 | @nestjs/jwt, passport-github2, crypto (AES-256) |
 | `UserModule` | 사용자 조회, 프로필 관리 | Prisma |
-| `GenerationModule` | 생성 요청 접수, BullMQ 큐잉, 생성 이력 저장/조회 | BullMQ, Prisma |
-| `AgentModule` | Claude Agent SDK 호출, 파이프라인 실행(분석→문서화→개발→테스트) | @anthropic-ai/sdk |
-| `GithubModule` | GitHub repo 생성, 파일 트리 커밋, clone URL 반환 | @octokit/rest |
+| `GenerationModule` | 생성 요청 접수, BullMQ 큐잉, 생성 이력 저장/조회, 피드백 처리 | BullMQ, Prisma |
+| `AgentModule` | Claude Agent SDK 호출, 파이프라인 실행(분석→피드백대기→개발→테스트) | @anthropic-ai/sdk |
+| `GithubModule` | 사용자 계정에 repo 생성, 파일 트리 커밋, clone URL 반환 | @octokit/rest |
 | `SseModule` | SSE 연결 관리, 이벤트 발행, 연결 해제 처리 | NestJS built-in SSE |
 | `PrismaModule` | DB 연결 및 ORM 제공 (전역 모듈) | Prisma Client |
 
@@ -48,8 +50,8 @@ mvp-builder는 다음 세 영역으로 구성된다.
 
 | 컴포넌트 | 역할 |
 |----------|------|
-| PostgreSQL 16 | 메인 데이터 저장소 (USER, GENERATION, REFRESH_TOKEN) |
-| Redis 7 | BullMQ 큐 브로커. Refresh Token 블랙리스트 처리 옵션. |
+| PostgreSQL 16 | 메인 데이터 저장소 (USERS, GENERATIONS) |
+| Redis 7 | BullMQ 큐 브로커. |
 | BullMQ | 생성 작업 큐 관리. 사용자당 동시 1건 제한. 재시도(최대 3회, exponential backoff). |
 | AWS EC2 | 컨테이너 호스팅 (초기 구성) |
 | AWS CloudWatch Logs | 구조화된 JSON 로그 수집 |
@@ -86,8 +88,8 @@ graph TD
 
     subgraph ExternalServices["External Services"]
         CLAUDE["Claude Agent SDK<br/>(Anthropic)"]
-        GITHUB["GitHub REST API v3"]
-        GMAIL["Gmail SMTP"]
+        GITHUB_API["GitHub REST API v3"]
+        GITHUB_OAUTH["GitHub OAuth API"]
     end
 
     FE -->|"REST API (HTTPS)"| API
@@ -97,6 +99,8 @@ graph TD
     API --> GEN
     API --> SSE_MOD
 
+    AUTH -->|"OAuth 인증"| GITHUB_OAUTH
+
     GEN -->|"enqueue job"| REDIS
     REDIS -->|"dequeue job"| QUEUE
     QUEUE --> AGENT
@@ -104,16 +108,14 @@ graph TD
     QUEUE -->|"SSE 이벤트 발행"| SSE_MOD
 
     AGENT -->|"API 호출"| CLAUDE
-    GH_MOD -->|"repo 생성 + 파일 커밋"| GITHUB
-    AUTH -->|"인증 메일 발송"| GMAIL
+    GH_MOD -->|"사용자 계정 repo 생성 + 파일 커밋"| GITHUB_API
 
     AUTH --> PG
     USER --> PG
     GEN --> PG
-    AUTH --> REDIS
 ```
 
-### 3.2 생성 파이프라인 시퀀스
+### 3.2 생성 파이프라인 시퀀스 (피드백 루프 포함)
 
 ```mermaid
 sequenceDiagram
@@ -134,69 +136,73 @@ sequenceDiagram
 
     Queue->>Agent: 작업 시작
     Note over Agent: 1단계: 분석 (0~20%)
-    Agent-->>BE: 단계 이벤트
-    BE-->>FE: SSE: event=progress { stage="analyzing", percent=10 }
+    Agent-->>BE: 분석 문서 생성 완료 (ERD, API 설계, 아키텍처)
+    BE->>BE: analysisDoc DB 저장, status=awaiting_feedback
+    BE-->>FE: SSE: event=analysis_ready { percent=20 }
 
-    Note over Agent: 2단계: 문서화 (20~40%)
-    Agent-->>BE: 단계 이벤트
-    BE-->>FE: SSE: event=progress { stage="documenting", percent=30 }
+    Note over FE,User: 사용자 분석 문서 검토
+    FE->>BE: GET /api/v1/generation/:jobId/analysis
+    BE-->>FE: 분석 문서 반환
+    FE->>User: 분석 문서 표시 (ERD, API 설계, 아키텍처)
 
-    Note over Agent: 3단계: 개발 (40~80%)
+    User->>FE: 피드백 입력 후 승인 또는 수정 요청
+    FE->>BE: POST /api/v1/generation/:jobId/feedback
+    BE->>Queue: 개발 단계 작업 enqueue
+    BE-->>FE: 200 { status: "developing" }
+    FE->>BE: SSE 재연결
+
+    Note over Agent: 2단계: 개발 (20~80%)
     Agent-->>BE: 단계 이벤트
     BE-->>FE: SSE: event=progress { stage="developing", percent=60 }
 
-    Note over Agent: 4단계: 테스트 (80~100%)
-    Agent-->>BE: 생성 완료 (파일 트리 + 코드)
+    Note over Agent: 3단계: 테스트 (80~90%)
+    Agent-->>BE: 테스트 리포트 생성 완료
+    BE->>BE: testReport DB 저장
     BE-->>FE: SSE: event=progress { stage="testing", percent=90 }
 
-    BE->>GH: repo 생성 (mvp-{keyword}-{username})
+    Note over Agent: 4단계: 업로드 (90~99%)
+    BE->>GH: 사용자 계정에 repo 생성 (사용자 OAuth token 사용)
     GH-->>BE: repo 생성 완료
     BE->>GH: 파일 전체 커밋
     GH-->>BE: clone URL
 
     BE->>BE: Generation 레코드 업데이트 (status=completed, cloneUrl)
-    BE-->>FE: SSE: event=completed { cloneUrl }
-    FE->>User: clone URL 표시 + 복사 버튼
+    BE-->>FE: SSE: event=completed { cloneUrl, testReport }
+    FE->>User: 테스트 리포트 + clone URL 표시
 
     Note over BE,FE: 에러 발생 시
     BE-->>FE: SSE: event=error { message, stage }
     FE->>User: 에러 메시지 표시
 ```
 
-### 3.3 인증 흐름
+### 3.3 GitHub OAuth 인증 흐름
 
 ```mermaid
 sequenceDiagram
     actor User
     participant FE as Frontend
     participant BE as Backend
-    participant DB as PostgreSQL
-    participant Mail as Gmail SMTP
+    participant GH as GitHub OAuth
 
-    Note over User,Mail: 회원가입
-    User->>FE: 이메일 + 비밀번호 입력
-    FE->>BE: POST /api/v1/auth/register
-    BE->>DB: 사용자 생성 (isEmailVerified=false)
-    BE->>Mail: 인증 메일 발송 (token 포함)
-    BE-->>FE: 201 { message: "인증 메일을 확인하세요" }
+    User->>FE: "GitHub로 로그인" 클릭
+    FE->>BE: GET /api/v1/auth/github
+    BE-->>FE: 302 Redirect → GitHub OAuth 페이지
 
-    User->>BE: GET /api/v1/auth/verify-email?token=...
-    BE->>DB: isEmailVerified=true 업데이트
-    BE-->>FE: 302 리다이렉트 (로그인 페이지)
+    User->>GH: GitHub 로그인 + 권한 승인
+    GH-->>BE: GET /api/v1/auth/github/callback?code=...
+    BE->>GH: code → access_token 교환
+    GH-->>BE: access_token + user info (id, username, email)
 
-    Note over User,Mail: 로그인
-    User->>FE: 이메일 + 비밀번호
-    FE->>BE: POST /api/v1/auth/login
-    BE->>DB: 사용자 조회 + bcrypt 검증
-    BE->>DB: Refresh Token 저장
-    BE-->>FE: 200 { accessToken, refreshToken }
-    FE->>FE: accessToken 메모리 저장, refreshToken 쿠키 저장
+    alt 신규 사용자
+        BE->>BE: 사용자 계정 생성 (github_id, github_username, github_access_token 암호화 저장)
+    else 기존 사용자
+        BE->>BE: github_access_token 갱신
+    end
 
-    Note over User,Mail: 토큰 갱신
-    FE->>BE: POST /api/v1/auth/refresh (refreshToken 쿠키)
-    BE->>DB: Refresh Token 검증 + 무효화
-    BE->>DB: 새 Refresh Token 저장 (Rotation)
-    BE-->>FE: 200 { accessToken, refreshToken }
+    BE->>BE: JWT accessToken 발급
+    BE-->>FE: 302 Redirect (프론트엔드 URL?accessToken=...)
+    FE->>FE: accessToken Zustand store에 저장
+    FE->>User: 메인 생성 페이지 표시
 ```
 
 ---
@@ -214,12 +220,32 @@ sequenceDiagram
   → GenerationModule: Generation 레코드 생성 (status=pending)
   → BullMQ: job enqueue (jobId = generationId)
   → FE: SSE 연결 (/api/v1/generation/:jobId/stream)
-  → AgentModule: Claude SDK 호출 (4단계 파이프라인)
-  → SSE 이벤트 발행 (progress 0~100%)
-  → GithubModule: repo 생성 + 파일 커밋
+
+  [analyzing 0~20%]
+  → AgentModule: 분석 문서 생성
+  → Generation 레코드 업데이트 (status=awaiting_feedback, analysisDoc 저장)
+  → SSE analysis_ready 이벤트
+
+  [사용자 검토]
+  → FE: GET /api/v1/generation/:jobId/analysis → 분석 문서 표시
+  → 사용자 피드백 제출: POST /api/v1/generation/:jobId/feedback
+  → BullMQ: 개발 단계 job enqueue
+  → Generation 레코드 업데이트 (status=developing, userFeedback 저장)
+
+  [developing 20~80%]
+  → AgentModule: 피드백 반영하여 코드 생성
+  → SSE progress 이벤트
+
+  [testing 80~90%]
+  → AgentModule: 테스트 실행 → 리포트 생성
+  → Generation 레코드 업데이트 (testReport 저장)
+  → SSE progress 이벤트
+
+  [uploading 90~99%]
+  → GithubModule: 사용자 OAuth token으로 repo 생성 + 파일 커밋
   → Generation 레코드 업데이트 (status=completed, cloneUrl, fileTree)
-  → SSE completed 이벤트
-  → FE: clone URL 표시
+  → SSE completed 이벤트 (cloneUrl, testReport 포함)
+  → FE: 테스트 리포트 + clone URL 표시
 ```
 
 #### 시나리오 2: 생성 이력 조회
@@ -231,14 +257,12 @@ GET /api/v1/generation (Authorization: Bearer accessToken)
   → Response: 생성 이력 배열 (id, status, requirements 요약, cloneUrl, createdAt)
 ```
 
-#### 시나리오 3: 토큰 만료 처리 (FE 자동 갱신)
+#### 시나리오 3: 토큰 만료 처리
 
 ```
 API 호출 → 401 Unauthorized
   → FE TanStack Query: 401 인터셉터 감지
-  → POST /api/v1/auth/refresh
-  → 성공: 새 accessToken으로 원래 요청 재시도
-  → 실패: 로그인 페이지 리다이렉트
+  → GitHub OAuth 재인증 또는 로그인 페이지 리다이렉트
 ```
 
 ---
@@ -249,26 +273,25 @@ API 호출 → 401 Unauthorized
 
 | 항목 | 구현 방식 | 근거 |
 |------|----------|------|
+| 로그인 방식 | GitHub OAuth 2.0. 이메일/비밀번호 미사용. | 개발자 타겟, GitHub 계정 전제 |
 | Access Token | JWT. 만료 15분. 메모리(Zustand store)에만 저장. LocalStorage 미사용. | C-SEC-01, C-SEC-02 |
-| Refresh Token | httpOnly + Secure 쿠키로 전달. DB 저장. 7일 만료. Rotation 적용. | C-SEC-01, C-SEC-03 |
-| 이메일 인증 미완료 계정 | 로그인 시 `403 Forbidden` 반환. 인증 메일 재발송 옵션 제공. | C-SEC-01 |
+| GitHub OAuth Token | AES-256 암호화 후 DB 저장. 복호화 키는 환경변수. | C-SEC-06, C-SEC-14 |
 | 모든 인증 필요 API | NestJS `@UseGuards(JwtAuthGuard)` 데코레이터로 보호. | C-SEC-04 |
-| 비밀번호 | bcrypt(salt rounds: 12) 해싱. 평문 저장 및 응답 포함 금지. | C-SEC-05 |
 
 ### 5.2 민감 데이터 처리
 
 | 데이터 | 처리 방식 | 근거 |
 |--------|----------|------|
-| Claude API key | 서버 환경 변수. 클라이언트 노출 불가. 로그 마스킹. | C-SEC-06, C-SEC-12, C-SEC-14 |
-| GitHub token | 서버 환경 변수(운영자 소유). 클라이언트 노출 불가. 로그 마스킹. DB 미저장. | C-SEC-06, C-SEC-08, C-SEC-12, C-SEC-14 |
-| 사용자 비밀번호 | bcrypt 해싱 저장. API 응답에서 제외(DTO 명시 제외). | C-SEC-05, C-SEC-07 |
-| Refresh Token | DB 저장 시 SHA-256 해시값으로 저장. 검증 시 쿠키 값을 해싱해서 비교. 유출 시 즉시 무효화 가능(Rotation). | C-SEC-03 |
+| Claude API key (MVP) | 서버 환경 변수. 클라이언트 노출 불가. 로그 마스킹. | C-SEC-06, C-SEC-12, C-SEC-14 |
+| Claude API key (BYOK, 이후 버전) | 사용자 직접 입력. 세션에만 보관, DB 미저장. 로그 마스킹. | C-SEC-06 |
+| GitHub OAuth Token | AES-256 암호화 저장. 복호화는 서버에서만. 로그 마스킹. | C-SEC-06, C-SEC-08 |
 | 비밀 정보 (JWT secret 등) | 코드 하드코딩 금지. 프로덕션은 AWS Secrets Manager 사용. | C-SEC-12, C-SEC-13, C-SEC-14 |
 
 ### 5.3 입력 검증
 
 - 모든 API: NestJS `ValidationPipe` + `class-validator`로 서버 측 검증 (C-SEC-09)
 - 자연어 요구사항: 최대 10,000자 제한 (C-SEC-10)
+- 사용자 피드백: 최대 5,000자 제한
 - 생성된 코드: 서버에서 실행하지 않음 (C-SEC-11)
 
 ### 5.4 CORS 및 전송 보안
@@ -289,7 +312,7 @@ API 호출 → 401 Unauthorized
   "statusCode": 400,
   "message": "요구사항은 최대 10,000자까지 입력 가능합니다.",
   "error": "Bad Request",
-  "timestamp": "2026-03-17T12:00:00.000Z",
+  "timestamp": "2026-03-26T12:00:00.000Z",
   "path": "/api/v1/generation"
 }
 ```
@@ -299,8 +322,9 @@ API 호출 → 401 Unauthorized
 | 에러 유형 | 처리 방식 |
 |----------|----------|
 | Claude API 호출 실패 | 최대 3회 재시도(exponential backoff). 전체 실패 시 SSE error 이벤트 발행. Generation 상태 `failed`로 업데이트. |
-| GitHub API 호출 실패 | SSE error 이벤트 즉시 발행(C-CODE-16). Generation 상태 `failed`로 업데이트. |
-| 타임아웃 초과 | SSE timeout 이벤트 발행. "요구사항을 간소화한 후 재시도해주세요" 메시지 표시. 작업 자동 취소. |
+| GitHub API 호출 실패 | SSE error 이벤트 즉시 발행. Generation 상태 `failed`로 업데이트. |
+| awaiting_feedback 상태에서 타임아웃 | 피드백 미제출 24시간 경과 시 Generation 상태 `timeout`으로 업데이트. |
+| 타임아웃 초과 (생성 중) | SSE timeout 이벤트 발행. "요구사항을 간소화한 후 재시도해주세요" 메시지 표시. 작업 자동 취소. |
 | 사용자 이미 생성 중 | `409 Conflict` 반환. 진행 중인 생성의 jobId 포함. |
 
 ---

@@ -97,7 +97,7 @@
 | 생성 성공률 (일간) | 24시간 이내 80% 미만으로 하락 | Claude API 상태 확인, 파이프라인 에러 로그 분석 |
 | 생성 실패 건수 급증 | 1시간 내 실패 건수 10건 초과 | 즉시 장애 대응 절차 가동 |
 | BullMQ 큐 적체 | 대기 중 작업(`status=pending`) 50건 초과 | Worker 인스턴스 증설 또는 Claude API 이슈 확인 |
-| 신규 가입 0건 | 24시간 이상 신규 가입 없음 | 이메일 인증 흐름 또는 회원가입 API 동작 확인 |
+| 신규 가입 0건 | 24시간 이상 신규 가입 없음 | GitHub OAuth 로그인 흐름(`GET /auth/github/callback`) 또는 사용자 생성 API 동작 확인 |
 | 생성 대기 이탈률 과다 | 주간 이탈률 60% 초과 (KPI Kill 기준 — `kpi.md` 실패 신호) | 생성 소요 시간 분석, SSE 이벤트 전달 정상 여부 확인, 대기 중 예상 완료 시간 표시 개선 검토 |
 
 ---
@@ -122,8 +122,8 @@
 | 항목 | 내용 |
 |------|------|
 | 도구 | Google Analytics 4 |
-| 측정 대상 KPI | KPI-P-02 (clone URL 클릭률), KPI-S-04 (회원가입 완료율 퍼널) |
-| 주요 이벤트 | `clone_url_copied`, `github_repo_opened`, 페이지 뷰(`/`, `/register`, `/history` 등) |
+| 측정 대상 KPI | KPI-P-02 (clone URL 클릭률), KPI-S-04 (GitHub OAuth 로그인 전환율) |
+| 주요 이벤트 | `clone_url_copied`, `github_repo_opened`, `github_login_clicked`, 페이지 뷰(`/`, `/history` 등) |
 | 점검 주기 | 주간 (KPI 측정 주기와 동일) |
 
 #### GA4 운영 점검 항목
@@ -131,7 +131,7 @@
 | 점검 항목 | 확인 방법 | 이상 징후 |
 |---------|---------|---------|
 | 이벤트 수집 여부 | GA4 실시간 보고서에서 `clone_url_copied` 이벤트 발생 확인 | 완료 화면 도달 후 이벤트 0건 → 태깅 오류 의심 |
-| 퍼널 데이터 정상 수집 | GA4 탐색 보고서 → 회원가입 퍼널 단계별 수치 확인 | 특정 단계에서 갑작스러운 100% 이탈 → 이벤트 누락 의심 |
+| 로그인 전환 데이터 수집 | GA4 탐색 보고서 → `github_login_clicked` → 메인 페이지 도달 전환율 확인 | 특정 단계에서 갑작스러운 100% 이탈 → 이벤트 누락 의심 |
 | 데이터 스트림 연결 상태 | GA4 관리 → 데이터 스트림 → 최근 48시간 이내 데이터 수신 여부 | 데이터 수신 없음 → `gtag.js` 로드 오류 또는 네트워크 차단 의심 |
 
 > 가정: GA4 태깅은 Frontend 빌드에 포함된다. `VITE_GA4_MEASUREMENT_ID` 환경 변수로 Measurement ID를 주입한다. 광고 차단 확장 프로그램으로 인한 일부 데이터 누락은 허용 오차로 취급한다.
@@ -270,18 +270,19 @@ aws rds reboot-db-instance --db-instance-identifier mvp-builder-db
 
 **즉시 조치**
 1. GitHub 상태 페이지 확인: `https://www.githubstatus.com`
-2. 운영자 GitHub Token 만료/권한 변경 여부 확인
-3. GitHub API rate limit 초과 여부 확인: `https://api.github.com/rate_limit` (운영자 token 사용)
+2. 특정 사용자에서 반복 실패하는지 또는 전체 사용자에서 실패하는지 로그로 구분
+3. GitHub API rate limit 초과 여부 확인: `https://api.github.com/rate_limit` (해당 사용자 token 사용)
 
 ```bash
-# GitHub Token 권한 및 rate limit 확인 (EC2에서)
-curl -H "Authorization: Bearer <GITHUB_TOKEN>" \
+# 특정 사용자 GitHub token으로 rate limit 확인 (users 테이블에서 복호화된 token 사용)
+curl -H "Authorization: Bearer <USER_GITHUB_ACCESS_TOKEN>" \
   https://api.github.com/rate_limit
 ```
 
 **근본 원인 조사**
 - Backend 로그 필터: `{ $.service = "GithubModule" && $.level = "ERROR" }`
 - `C-CODE-16`: GitHub API 호출 실패 시 SSE error 이벤트 발행 확인
+- 사용자 GitHub OAuth token 만료 또는 권한 변경 여부 확인 (사용자가 OAuth App 권한을 취소한 경우)
 - repo 네이밍 충돌(`mvp-{keyword}-{username}` 중복) 여부 확인
 
 **복구 확인**
@@ -290,27 +291,31 @@ curl -H "Authorization: Bearer <GITHUB_TOKEN>" \
 
 ---
 
-#### 3-C Gmail SMTP 장애 (이메일 인증 발송 불가)
+#### 3-C GitHub OAuth 장애 (로그인 불가)
 
 **증상**
-- 회원가입 후 인증 메일 미수신 사용자 문의 급증
-- Backend 로그에 `Nodemailer Error: connect ECONNREFUSED` 또는 `Invalid login` 반복
+- 랜딩 페이지에서 "GitHub으로 시작하기" 클릭 후 에러 페이지로 이동
+- Backend 로그에 `passport-github2 Error` 또는 `GitHub OAuth callback error` 반복
+- `GET /auth/github/callback` 엔드포인트 4xx/5xx 에러 급증
 
 **영향 범위**
-- 신규 회원가입 이메일 인증 불가. 기존 인증된 사용자의 로그인 및 생성 기능은 정상.
+- 신규 로그인 및 회원 가입 전체 불가. 기존 JWT가 유효한 사용자의 API 접근은 Access Token 만료 전까지 정상.
 
 **즉시 조치**
-1. Gmail SMTP 접근 가능 여부 확인: EC2에서 포트 465 또는 587 테스트
-2. Gmail 앱 비밀번호(`GMAIL_APP_PASSWORD`) 유효성 확인 (Google 계정 보안 설정)
-3. Gmail 일일 발송 한도(500건/일, 무료 계정 기준) 초과 여부 확인
+1. GitHub 상태 페이지 확인: `https://www.githubstatus.com` (OAuth 관련 인시던트 여부)
+2. GitHub OAuth App 설정 확인 (GitHub → Settings → Developer settings → OAuth Apps)
+   - Callback URL이 `GITHUB_OAUTH_CALLBACK_URL` 환경 변수 값과 일치하는지 확인
+   - `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` 만료 또는 재설정 여부 확인
+3. Backend 환경 변수 로드 확인
 
 **근본 원인 조사**
-- Backend 로그에서 `Nodemailer` 관련 ERROR 로그 확인
-- Google 계정 보안 알림 이메일 확인 (비정상 로그인 시도로 앱 비밀번호 비활성화 가능)
+- Backend 로그 필터: `{ $.service = "AuthModule" && $.level = "ERROR" }`
+- `GITHUB_CLIENT_SECRET` 만료 또는 OAuth App 권한 변경 여부 확인
+- GitHub OAuth App의 `Authorization callback URL` 설정이 프로덕션 URL과 일치하는지 확인
 
 **복구 확인**
-- 테스트 이메일 발송 성공 (`POST /auth/resend-verification` 호출)
-- 인증 메일 수신 확인
+- `GET /auth/github` → GitHub OAuth 동의 화면 정상 표시 확인
+- 테스트 계정으로 로그인 전체 흐름 성공 확인
 
 ---
 
@@ -322,7 +327,7 @@ curl -H "Authorization: Bearer <GITHUB_TOKEN>" \
 - 진행 중인 생성 작업 상태 업데이트 불가
 
 **영향 범위**
-- 신규 MVP 생성 요청 전체 불가. 인증 기능은 Redis Refresh Token 블랙리스트 기능이 있으나, 초기 MVP에서는 DB 기반으로 동작하므로 로그인/로그아웃은 정상 작동 가능.
+- 신규 MVP 생성 요청 전체 불가. 인증(GitHub OAuth, JWT 검증)은 Redis 미의존으로 동작하므로 로그인/로그아웃은 정상 작동 가능.
 
 **즉시 조치**
 ```bash
@@ -411,17 +416,14 @@ docker image prune -a -f
 | `DATABASE_URL` | PostgreSQL 연결 문자열 | 필수 | `postgresql://user:pass@host:5432/dbname?schema=public` | AWS Secrets Manager |
 | `REDIS_URL` | Redis 연결 문자열 | 필수 | `redis://host:6379` | AWS Secrets Manager |
 | `JWT_SECRET` | Access Token JWT 서명 키 (최소 32자 랜덤 문자열) | 필수 | `your-secret-key-minimum-32-chars` | AWS Secrets Manager |
-| `JWT_REFRESH_SECRET` | Refresh Token JWT 서명 키 (최소 32자 랜덤 문자열) | 필수 | `your-refresh-secret-key-minimum-32-chars` | AWS Secrets Manager |
 | `JWT_EXPIRES_IN` | Access Token 만료 시간 | 필수 | `15m` | 환경 변수 |
-| `JWT_REFRESH_EXPIRES_IN` | Refresh Token 만료 시간 | 필수 | `7d` | 환경 변수 |
 | `ANTHROPIC_API_KEY` | Claude API key (운영자 소유) | 필수 | `sk-ant-api03-...` | AWS Secrets Manager |
-| `GITHUB_TOKEN` | GitHub Personal Access Token (repo 생성 권한) | 필수 | `ghp_...` | AWS Secrets Manager |
-| `GITHUB_OWNER` | 생성 repo 소유자 GitHub 계정명 | 필수 | `mvp-builder-org` | 환경 변수 |
-| `GMAIL_USER` | 이메일 발송 Gmail 계정 | 필수 | `noreply@example.com` | AWS Secrets Manager |
-| `GMAIL_APP_PASSWORD` | Gmail 앱 비밀번호 (2단계 인증 앱 비밀번호) | 필수 | `xxxx xxxx xxxx xxxx` | AWS Secrets Manager |
-| `APP_URL` | 서비스 공개 URL (이메일 인증 링크 생성용) | 필수 | `https://mvp-builder.com` | 환경 변수 |
-| `FRONTEND_URL` | Frontend URL (CORS 허용 Origin) | 필수 | `https://mvp-builder.com` | 환경 변수 |
-| `EMAIL_VERIFICATION_EXPIRES_HOURS` | 이메일 인증 토큰 유효 시간(시간) | 선택 | `24` | 환경 변수 |
+| `GITHUB_CLIENT_ID` | GitHub OAuth App Client ID | 필수 | `Ov23liXXXXXXXXX` | AWS Secrets Manager |
+| `GITHUB_CLIENT_SECRET` | GitHub OAuth App Client Secret | 필수 | `your-client-secret` | AWS Secrets Manager |
+| `GITHUB_OAUTH_CALLBACK_URL` | GitHub OAuth 콜백 URL | 필수 | `https://api.mvp-builder.com/api/v1/auth/github/callback` | 환경 변수 |
+| `ENCRYPTION_KEY` | GitHub OAuth token AES-256-GCM 암호화 키 (32바이트) | 필수 | `your-32-byte-encryption-key` | AWS Secrets Manager |
+| `APP_URL` | 서비스 공개 URL | 필수 | `https://mvp-builder.com` | 환경 변수 |
+| `FRONTEND_URL` | Frontend URL (CORS 허용 Origin, OAuth 리다이렉트 대상) | 필수 | `https://mvp-builder.com` | 환경 변수 |
 | `GENERATION_TIMEOUT_MINUTES` | 생성 타임아웃 시간(분) | 선택 | `15` | 환경 변수 |
 | `BULLMQ_CONCURRENCY` | BullMQ Worker 동시 처리 수 | 선택 | `5` | 환경 변수 |
 
@@ -446,13 +448,13 @@ docker image prune -a -f
 
 ## 4. 백업 및 복구 정책
 
-`erd.md`의 데이터 모델(`users`, `email_verification_tokens`, `refresh_tokens`, `generations`)을 기반으로 작성한다.
+`erd.md`의 데이터 모델(`users`, `generations`)을 기반으로 작성한다.
 
 ### 4.1 백업 대상
 
 | 대상 | 유형 | 비고 |
 |------|------|------|
-| PostgreSQL (RDS) | 메인 데이터 | 사용자 계정, 생성 이력, 인증 토큰 전체 포함 |
+| PostgreSQL (RDS) | 메인 데이터 | 사용자 계정(`users`), 생성 이력(`generations`) 전체 포함 |
 | Redis (ElastiCache) | 큐 데이터 (BullMQ) | 큐 데이터는 ephemeral하게 취급. 장애 시 재생성 요청으로 복구. |
 | AWS Secrets Manager | 시크릿 | AWS 자체 관리 (버전 관리 내장) |
 | GitHub Actions 워크플로 | CI/CD 설정 | Git 저장소에 포함됨 (`/.github/workflows/`) |

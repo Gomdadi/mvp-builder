@@ -136,7 +136,6 @@ body {
 .title-layout .subtitle { margin-top: 15px; max-width: 800px; }
 .title-layout .accent-line { width: 80px; height: 6px; background-color: var(--secondary-color); margin: 40px auto; border-radius: 3px; }
 
-/* ⬇️ 여기서부터 수정된 부분: 박스 높이 자동 조절 및 내부 여백/글씨 간격 축소 */
 .two-column { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; width: 100%; height: auto; }
 .two-column.tiled { align-items: stretch; }
 .two-column.tiled > div { background-color: var(--accent-color); border-radius: 16px; border: 1px solid var(--border-color); padding: 30px 40px; display: flex; flex-direction: column; }
@@ -144,7 +143,6 @@ body {
 .two-column ul { list-style: none; }
 .two-column li { margin-bottom: 14px; position: relative; padding-left: 24px; font-size: 17px; line-height: 1.5; }
 .two-column li::before { content: "•"; color: var(--secondary-color); font-size: 24px; position: absolute; left: 0; top: -5px; }
-/* ⬆️ 여기까지 수정됨 */
 
 .table-layout { width: 100%; background-color: var(--white); border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border: 1px solid var(--border-color); }
 .table-layout table { width: 100%; border-collapse: collapse; }
@@ -173,33 +171,6 @@ code { background-color: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-fam
 /* 🖼️ 추가된 이미지 관련 스타일 (네모칸 방지) */
 img { border: none !important; outline: none !important; box-shadow: none !important; background: transparent; max-width: 100%; }
 .no-box { border: none !important; background: transparent !important; box-shadow: none !important; padding: 0 !important; }
-
-/* 🖨️ PDF 다운로드 버튼 스타일 */
-.pdf-download-btn {
-  position: fixed;
-  bottom: 40px;
-  right: 40px;
-  background-color: var(--primary-color);
-  color: white;
-  border: none;
-  padding: 16px 28px;
-  border-radius: 30px;
-  font-size: 16px;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.3);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  z-index: 1000;
-  transition: all 0.3s ease;
-  font-family: 'Noto Sans KR', sans-serif;
-}
-.pdf-download-btn:hover {
-  background-color: var(--secondary-color);
-  transform: translateY(-5px);
-  box-shadow: 0 15px 25px rgba(14, 165, 233, 0.4);
-}
 
 /* ========================================= */
 /* 🖨️ PRINT SETTINGS (페이지 잘림 방지)         */
@@ -232,48 +203,12 @@ img { border: none !important; outline: none !important; box-shadow: none !impor
     box-shadow: none !important; /* 🔥 PPT 변환 시 회색 네모 박스 생기는 문제 해결 */
     text-shadow: none !important;
   }
-  
-  /* 인쇄 시 PDF 다운로드 버튼 숨기기 */
-  .pdf-download-btn {
-    display: none !important;
-  }
-  
-  /* 인쇄 시 모달 숨기기 */
-  .modal-overlay {
-    display: none !important;
-  }
 }
-
-/* 🖼️ 커스텀 모달 스타일 */
-.modal-overlay {
-  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-  background: rgba(0,0,0,0.6); z-index: 2000;
-  display: flex; align-items: center; justify-content: center;
-  font-family: 'Noto Sans KR', sans-serif;
-}
-.modal-content {
-  background: white; padding: 35px; border-radius: 16px;
-  width: 420px; max-width: 90%; box-shadow: 0 20px 40px rgba(0,0,0,0.2);
-}
-.modal-content h3 { color: var(--primary-color); margin-bottom: 15px; font-size: 22px; font-weight: 700; border-bottom: 2px solid var(--border-color); padding-bottom: 10px;}
-.modal-content p { margin-bottom: 20px; font-size: 16px; color: var(--text-main); font-weight: 500;}
-.modal-content ul { list-style: none; margin-bottom: 30px; background: var(--bg-color); padding: 15px; border-radius: 8px;}
-.modal-content li { margin-bottom: 10px; font-size: 15px; color: var(--primary-color); }
-.modal-content li:last-child { margin-bottom: 0; }
-.modal-buttons { display: flex; justify-content: flex-end; gap: 10px; }
-.modal-btn { background: var(--secondary-color); color: white; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-size: 15px; font-weight: 700; transition: background 0.2s;}
-.modal-btn:hover { background: #0284c7; }
-.modal-btn.cancel { background: #e2e8f0; color: var(--text-main); }
-.modal-btn.cancel:hover { background: #cbd5e1; }
     </style>
 </head>
 <body>
 
-<!-- 🖨️ PDF 다운로드 플로팅 버튼 -->
-<button class="pdf-download-btn" onclick="saveAsPDF()">
-    <i class="fa-solid fa-file-pdf"></i> PDF로 저장하기
-</button>
-
+<!-- Slide 1: Title Slide -->
 <div class="slide-container" id="slide1">
     <div class="title-layout">
         <span class="highlight-tag">프로젝트 주제 제안서</span>
@@ -284,6 +219,7 @@ img { border: none !important; outline: none !important; box-shadow: none !impor
     <p class="author-credit">2019920018 김준호</p>
 </div>
 
+<!-- Slide 2: Background -->
 <div class="slide-container" id="slide2">
     <h2 class="slide-title">배경과 동기</h2>
     <div class="content-area">
@@ -312,41 +248,8 @@ img { border: none !important; outline: none !important; box-shadow: none !impor
     </div>
 </div>
 
+<!-- Slide 3: Competitor Comparison -->
 <div class="slide-container" id="slide3">
-    <h2 class="slide-title">프로젝트 핵심 난이도 및 설계 전략</h2>
-    <div class="content-area">
-        <div class="tiled-content">
-            <div class="tile no-arrow">
-                <div class="icon" style="background-color: #ef4444;"><i class="fa-solid fa-mountain-sun"></i></div>
-                <h3 style="color: #ef4444;">핵심 난이도</h3>
-                <ul>
-                    <li>단순한 코드 스니펫 생성이 아님</li>
-                    <li><strong>실행 가능하고 후속 개발이 가능한 수준의 MVP</strong>를 안정적으로 사용자에게 전달해야 함</li>
-                </ul>
-            </div>
-            <div class="tile no-arrow">
-                <div class="icon" style="background-color: #f59e0b;"><i class="fa-solid fa-list-check"></i></div>
-                <h3 style="color: #f59e0b;">고려할 사항 (어려운 이유)</h3>
-                <ul>
-                    <li>분석 → 피드백 → 생성 → 테스트 → GitHub 업로드로 이어지는 <strong>다단계 파이프라인 정합성</strong> 확보</li>
-                    <li><code>docker compose up --build</code> 명령어를 통한 즉각적인 <strong>실행 가능성 보장</strong></li>
-                    <li><strong>개발자 제어권</strong>(아키텍처 자유도)과 <strong>자동화 편의성</strong>의 균형점 도출</li>
-                    <li>GitHub OAuth, 저장소 생성, AI 생성 등 <strong>외부 서비스 연동 리스크 제어</strong></li>
-                </ul>
-            </div>
-            <div class="tile no-arrow">
-                <div class="icon" style="background-color: #10b981;"><i class="fa-solid fa-lightbulb"></i></div>
-                <h3 style="color: #10b981;">설계 전략</h3>
-                <ul>
-                    <li>모든 기능을 제공하는 범용 App Builder의 전체 구현을 과감히 배제</li>
-                    <li><strong>GitHub 직접 전달 + 실행 가능성 보장</strong>에만 집중한 MVP 범위로 문제를 제한하여 프로젝트 완성도와 가치를 극대화</li>
-                </ul>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="slide-container" id="slide4">
     <h2 class="slide-title">경쟁 플랫폼 대비 차별점</h2>
     <div class="content-area">
         <div class="table-layout">
@@ -380,6 +283,42 @@ img { border: none !important; outline: none !important; box-shadow: none !impor
     </div>
 </div>
 
+<!-- Slide 4: Technical Challenges -->
+<div class="slide-container" id="slide4">
+    <h2 class="slide-title">프로젝트 핵심 난이도 및 설계 전략</h2>
+    <div class="content-area">
+        <div class="tiled-content">
+            <div class="tile no-arrow">
+                <div class="icon" style="background-color: #ef4444;"><i class="fa-solid fa-mountain-sun"></i></div>
+                <h3 style="color: #ef4444;">핵심 난이도</h3>
+                <ul>
+                    <li>단순한 코드 스니펫 생성이 아님</li>
+                    <li><strong>실행 가능하고 후속 개발이 가능한 수준의 MVP</strong>를 안정적으로 사용자에게 전달해야 함</li>
+                </ul>
+            </div>
+            <div class="tile no-arrow">
+                <div class="icon" style="background-color: #f59e0b;"><i class="fa-solid fa-list-check"></i></div>
+                <h3 style="color: #f59e0b;">고려할 사항 (어려운 이유)</h3>
+                <ul>
+                    <li>분석 → 피드백 → 생성 → 테스트 → GitHub 업로드로 이어지는 <strong>다단계 파이프라인 정합성</strong> 확보</li>
+                    <li><code>docker compose up --build</code> 명령어를 통한 즉각적인 <strong>실행 가능성 보장</strong></li>
+                    <li><strong>개발자 제어권</strong>(아키텍처 자유도)과 <strong>자동화 편의성</strong>의 균형점 도출</li>
+                    <li>GitHub OAuth, 저장소 생성, AI 생성 등 <strong>외부 서비스 연동 리스크 제어</strong></li>
+                </ul>
+            </div>
+            <div class="tile no-arrow">
+                <div class="icon" style="background-color: #10b981;"><i class="fa-solid fa-lightbulb"></i></div>
+                <h3 style="color: #10b981;">설계 전략</h3>
+                <ul>
+                    <li>모든 기능을 제공하는 범용 App Builder의 전체 구현을 과감히 배제</li>
+                    <li><strong>GitHub 직접 전달 + 실행 가능성 보장</strong>에만 집중한 MVP 범위로 문제를 제한하여 프로젝트 완성도와 가치를 극대화</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Slide 5: Pipeline Architecture -->
 <div class="slide-container" id="slide5">
     <h2 class="slide-title">MVP 생성 파이프라인 구상도</h2>
     <div style="margin-bottom: 25px; display: flex; gap: 10px;">
@@ -420,42 +359,17 @@ img { border: none !important; outline: none !important; box-shadow: none !impor
     </div>
 </div>
 
-<!-- 🖨️ PDF 인쇄 안내 모달 -->
-<div id="printModal" class="modal-overlay" style="display: none;">
-    <div class="modal-content">
-        <h3><i class="fa-solid fa-circle-check" style="color: #10b981;"></i> PDF 저장 안내</h3>
-        <p>인쇄 창이 열리면 아래 3가지를 꼭 확인해 주세요!</p>
-        <ul>
-            <li>1. 대상: <strong>[PDF로 저장]</strong></li>
-            <li>2. 레이아웃: <strong>[가로]</strong></li>
-            <li>3. 옵션: <strong>[배경 그래픽] ✔️ 체크</strong></li>
-        </ul>
-        <div class="modal-buttons">
-            <button onclick="closeModal()" class="modal-btn cancel">취소</button>
-            <button onclick="executePrint()" class="modal-btn">확인 및 인쇄창 열기</button>
+<!-- Slide 6: Closing Slide -->
+<div class="slide-container" id="slide6">
+    <div class="title-layout">
+        <div class="icon" style="font-size: 64px; color: var(--secondary-color); margin-bottom: 25px;">
+            <i class="fa-solid fa-paper-plane"></i>
         </div>
+        <h1 style="font-size: 80px; margin-bottom: 10px;">감사합니다</h1>
+        <div class="accent-line" style="margin: 30px auto;"></div>
     </div>
+    <p class="author-credit">2019920018 김준호</p>
 </div>
 
-<script>
-    // PDF 저장 버튼 클릭 시 모달 열기
-    function saveAsPDF() {
-        document.getElementById('printModal').style.display = 'flex';
-    }
-
-    // 모달 닫기
-    function closeModal() {
-        document.getElementById('printModal').style.display = 'none';
-    }
-
-    // 인쇄 실행
-    function executePrint() {
-        closeModal();
-        // 모달이 닫히는 애니메이션/렌더링 시간을 아주 짧게 기다린 후 인쇄창 호출
-        setTimeout(function() {
-            window.print();
-        }, 100);
-    }
-</script>
 </body>
 </html>

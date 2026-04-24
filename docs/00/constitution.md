@@ -104,7 +104,7 @@
 ### 비밀 정보 관리 (C-SEC-04)
 
 - 환경 변수로 관리 (`.env` 파일은 Git에 커밋 금지)
-- 운영 환경: AWS Secrets Manager 또는 환경 변수 주입
+- 운영 환경: GitHub Secrets를 통한 환경 변수 주입
 
 ---
 

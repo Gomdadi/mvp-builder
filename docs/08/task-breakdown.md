@@ -17,9 +17,9 @@
 | E7 | 파이프라인 오케스트레이션 | BullMQ 비동기 처리, Phase 1→2→3 순서 제어, 피드백 루프, 태스크 resume 전략 | docs/03/api-spec.md, docs/03/system-architecture.md |
 | E8 | SSE 실시간 스트리밍 | SSE Gateway, 클라이언트 EventSource 연동 | docs/03/api-spec.md, docs/04/user-flow.md |
 | E9 | GitHub 연동 서비스 | 저장소 생성, S3에서 코드 읽어 push, OAuth Token 관리 | docs/03/system-architecture.md, docs/01/PRD.md |
-| E10 | 프론트엔드 UI | S1~S8 화면 구현, Zustand 상태 관리 | docs/04/wireframe.md, docs/04/user-flow.md |
-| E11 | 테스트 | Unit + Integration Test 전체 작성 | docs/00/constitution.md, docs/03/api-spec.md |
-| E12 | 배포 / CI/CD | GitHub Actions, Docker 이미지 빌드, AWS EC2 배포 | docs/00/constitution.md, docs/03/tech-stack.md |
+| E10 | 프론트엔드 UI | S1~S8 화면 구현, Zustand 상태 관리 — **4일 스코프 제외** | docs/04/wireframe.md, docs/04/user-flow.md |
+| E11 | 테스트 | Unit + Integration Test 전체 작성 — **4일 스코프 제외** (각 태스크 unit test로 대체) | docs/00/constitution.md, docs/03/api-spec.md |
+| E12 | 배포 / CI/CD | GitHub Actions, Docker 이미지 빌드, AWS EC2 배포 — **4일 스코프 제외** | docs/00/constitution.md, docs/03/tech-stack.md |
 
 ---
 
@@ -380,46 +380,59 @@ flowchart TD
     E3 --> E9["E9: GitHub 연동"]
     E6 --> E9
     E9 --> E7
-    E3 --> E10["E10: 프론트엔드"]
-    E7 --> E10
-    E8 --> E10
-    E3 --> E11["E11: 테스트"]
-    E4 --> E11
-    E5 --> E11
-    E6 --> E11
-    E7 --> E11
-    E8 --> E11
-    E9 --> E11
-    E11 --> E12["E12: 배포/CI·CD"]
+    E3 -.->|"스코프 제외"| E10["E10: 프론트엔드"]
+    E7 -.-> E10
+    E8 -.-> E10
+    E3 -.->|"스코프 제외"| E11["E11: 테스트"]
+    E9 -.-> E11
+    E11 -.->|"스코프 제외"| E12["E12: 배포/CI·CD"]
 ```
 
 ---
 
 ## 마일스톤 (4일 플랜)
 
-### Day 1 — 기반 + Phase 1
-- T-E1-01, T-E1-02 (Docker, LocalStack 포함)
-- T-E2-01, T-E2-02 (Prisma 스키마 — generated_files, task status 포함)
-- T-E4-01 (Claude API Key 암호화 저장)
-- T-E5-01 (프로젝트 CRUD)
-- T-E7-01 (BullMQ 세팅)
-- T-E6-01, T-E6-02 (Claude Agent Service + Phase 1 문서 생성)
-- 목표: `POST /pipeline/:id/start` → Phase 1 분석 문서 생성 동작 확인
+> E10(프론트엔드), E11(테스트), E12(CI/CD)는 스코프 제외. 각 태스크 완료 기준의 unit test로 대체.
 
-### Day 2 — Phase 2~3 + BullMQ
-- T-E6-03, T-E6-04 (Phase 2 태스크 분해, Phase 3 코드 생성 + S3 업로드)
-- T-E7-02 (PipelineService 상태 머신 + resume 전략)
-- T-E8-01 (SSE Gateway)
-- T-E9-01 (GitHub Service — PAT 하드코딩으로 테스트)
-- 목표: Postman으로 Phase 1→2→3 전체 파이프라인 동작 확인, GitHub 저장소 push 확인
+### Day 1 — 기반 세팅
+| 태스크 | 내용 |
+|--------|------|
+| T-E1-01 | 모노레포 구조 생성 |
+| T-E1-02 | Docker Compose (PostgreSQL, Redis, LocalStack) |
+| T-E2-01 | Prisma 스키마 (generated_files, task status 포함) |
+| T-E2-02 | 시드 데이터 |
+| T-E4-01 | Claude API Key 암호화 CRUD |
+| T-E5-01 | 프로젝트 CRUD API |
+| T-E7-01 | BullMQ 세팅 + Pipeline Worker |
 
-### Day 3 — GitHub OAuth 교체 + 통합 테스트
-- T-E3-01, T-E3-02 (GitHub OAuth + JWT)
-- PAT → OAuth Token으로 교체
-- T-E11-01 (Integration Test)
-- 목표: GitHub 로그인 → 파이프라인 실행 → 저장소 push 전체 흐름 end-to-end 검증
+**완료 기준**: `docker compose up` 후 프로젝트 생성 API 동작 확인
 
-### Day 4 — 버그 수정 + 엣지 케이스
-- Phase 3 resume 시나리오 검증 (의도적 실패 후 재시작)
-- 에러 응답 코드 검증 (403, 409 등)
-- 전체 파이프라인 안정화
+### Day 2 — AI 파이프라인 핵심
+| 태스크 | 내용 |
+|--------|------|
+| T-E6-01 | `@anthropic-ai/sdk` 래퍼 (tool use) |
+| T-E6-02 | Phase 1: 문서 생성 + 디렉토리 구조 확정 |
+| T-E6-03 | Phase 2: 태스크 분해 |
+| T-E6-04 | Phase 3: 코드 생성 + S3 업로드 |
+| T-E8-01 | SSE Gateway |
+
+**완료 기준**: `POST /pipeline/:id/start` → Phase 1 분석 문서 생성 + SSE 스트리밍 동작 확인
+
+### Day 3 — 파이프라인 완성 + GitHub
+| 태스크 | 내용 |
+|--------|------|
+| T-E7-02 | PipelineService 상태 머신 + resume 전략 |
+| T-E9-01 | GitHub Service (PAT 하드코딩으로 테스트) |
+
+**완료 기준**: Postman으로 Phase 1→2→3 end-to-end 동작 확인, GitHub 저장소 자동 생성 + push 확인
+
+### Day 4 — 인증 교체 + 마무리
+| 태스크 | 내용 |
+|--------|------|
+| T-E3-01 | GitHub OAuth 전략 구현 |
+| T-E3-02 | JWT 미들웨어 + 토큰 갱신 |
+| — | PAT → OAuth Token 교체 |
+| — | Phase 3 resume 시나리오 검증 (의도적 실패 후 재시작) |
+| — | 에러 응답 코드 검증 (403, 409 등) |
+
+**완료 기준**: GitHub 로그인 → 파이프라인 실행 → 저장소 push 전체 흐름 end-to-end 동작 확인

@@ -27,12 +27,13 @@
 | 항목 | 선택 | 선택 이유 |
 |------|------|-----------|
 | **프레임워크** | NestJS 10+ | **[결정]** 모듈 기반 구조로 파이프라인 단계별 분리 용이, TypeScript 완전 지원, DI 내장 |
-| **언어** | TypeScript 5.x (strict) | 프론트엔드와 타입 공유, Claude Agent SDK TypeScript 지원 |
-| **AI 레이어** | Claude Agent SDK (TypeScript) | **[결정]** 제안서 명시, Anthropic 공식 SDK |
+| **언어** | TypeScript 5.x (strict) | 프론트엔드와 타입 공유, `@anthropic-ai/sdk` TypeScript 지원 |
+| **AI 레이어** | `@anthropic-ai/sdk` (Anthropic API SDK) | **[결정]** tool use 기반으로 에이전트·스킬을 코드로 직접 정의·오케스트레이션. Claude Code SDK 대비 흐름 제어 및 예측 가능성 높음 |
 | **ORM** | Prisma | 타입 안전 쿼리, 마이그레이션 관리, PostgreSQL 지원 |
 | **인증** | Passport.js + JWT | GitHub OAuth 전략 내장, NestJS 공식 지원 |
 | **유효성 검사** | class-validator + class-transformer | NestJS DTO 패턴과 통합 |
 | **SSE** | NestJS SSE (built-in) | AI 생성 진행 상황 스트리밍 전송 |
+| **Job Queue** | BullMQ (`bullmq` + `@nestjs/bullmq`) | **[결정]** 파이프라인 비동기 처리. Redis를 저장소로 재사용, 잡 상태 영속·retry 내장. 타임아웃 없이 수 분짜리 Phase 3 처리 가능 |
 
 ### 대안 비교 (백엔드)
 
@@ -48,10 +49,9 @@
 
 | 항목 | 선택 | 선택 이유 |
 |------|------|-----------|
-| **메인 DB** | PostgreSQL 15+ | **[결정]** 관계형 데이터(유저-프로젝트-단계 관계) 관리에 적합, JSONB로 분석 문서 저장 |
-| **캐시** | Redis | GitHub Token 캐시, 세션 관리, 향후 BullMQ 도입 시 재사용 |
-
-> 가정: Redis는 MVP에서 세션/토큰 캐시 용도로만 사용한다. BullMQ는 Out-of-scope.
+| **메인 DB** | PostgreSQL 15+ | **[결정]** 관계형 데이터(유저-프로젝트-단계 관계) 관리에 적합, JSONB로 분석 문서 저장. 생성 코드는 S3 경로(key)만 저장 |
+| **파일 스토리지** | AWS S3 | **[결정]** 생성된 코드 파일 원본 저장. DB 비대화 방지, GitHub push 시 S3에서 직접 읽어 전달 |
+| **캐시 / 큐 브로커** | Redis | GitHub Token 캐시, JWT Refresh Token, BullMQ job 저장소 |
 
 ### 대안 비교 (DB)
 
@@ -66,7 +66,7 @@
 
 | 항목 | 선택 | 선택 이유 |
 |------|------|-----------|
-| **클라우드** | AWS | **[결정]** 가장 범용적, ECS/EC2 선택 가능 |
+| **클라우드** | AWS | **[결정]** 가장 범용적, ECS/EC2 선택 가능. S3와 동일 계정으로 IAM 권한 관리 통합 |
 | **컨테이너화** | Docker + Docker Compose | **[결정]** 로컬 개발 환경, 생성 코드도 동일 패턴 적용 |
 | **CI/CD** | GitHub Actions | 코드 저장소와 동일 플랫폼, 설정 최소화 |
 | **환경 변수** | AWS Secrets Manager (운영) / .env (로컬) | C-SEC-04 준수 |
@@ -79,8 +79,8 @@
 
 ```
 Frontend:  Next.js 14 (App Router) + TypeScript + Tailwind + Zustand
-Backend:   NestJS + TypeScript + Prisma + Passport.js (GitHub OAuth)
-AI Layer:  Claude Agent SDK (TypeScript) — NestJS 서비스 레이어에 통합
-Database:  PostgreSQL 15 + Redis
-Infra:     Docker Compose (로컬/운영) + AWS EC2 + GitHub Actions
+Backend:   NestJS + TypeScript + Prisma + Passport.js (GitHub OAuth) + BullMQ
+AI Layer:  @anthropic-ai/sdk (TypeScript) — tool use 기반 에이전트·스킬 정의, NestJS 서비스 레이어에 통합
+Database:  PostgreSQL 15 + Redis + AWS S3 (생성 코드 파일)
+Infra:     Docker Compose (로컬/운영) + AWS EC2 + AWS S3 + GitHub Actions
 ```

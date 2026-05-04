@@ -6,25 +6,15 @@
 
 ### users
 
-| 컬럼명 | 타입 | 제약 | 설명 |
-|--------|------|------|------|
-| id | UUID | PK, DEFAULT gen_random_uuid() | 사용자 ID |
-| github_id | VARCHAR(100) | UNIQUE, NOT NULL | GitHub 사용자 고유 ID |
-| github_login | VARCHAR(100) | NOT NULL | GitHub 로그인명 |
-| avatar_url | TEXT | NULL | GitHub 프로필 이미지 URL |
-| encrypted_api_key | TEXT | NULL | AES-256-GCM 암호화된 Claude API Key |
-| created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | 생성일시 |
-| updated_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | 수정일시 |
-
-### refresh_tokens
-
-| 컬럼명 | 타입 | 제약 | 설명 |
-|--------|------|------|------|
-| id | UUID | PK | 토큰 ID |
-| user_id | UUID | FK → users.id, NOT NULL | 사용자 |
-| token_hash | VARCHAR(255) | UNIQUE, NOT NULL | Refresh Token 해시값 (bcrypt) |
-| expires_at | TIMESTAMPTZ | NOT NULL | 만료 일시 |
-| created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | 생성일시 |
+| 컬럼명            | 타입 | 제약 | 설명 |
+|----------------|------|------|------|
+| id             | UUID | PK, DEFAULT gen_random_uuid() | 사용자 ID |
+| github_id      | VARCHAR(100) | UNIQUE, NOT NULL | GitHub 사용자 고유 ID |
+| github_login   | VARCHAR(100) | NOT NULL | GitHub 로그인명 |
+| avatar_url     | TEXT | NULL | GitHub 프로필 이미지 URL |
+| claude_api_key | TEXT | NULL | AES-256-GCM 암호화된 Claude API Key |
+| created_at     | TIMESTAMPTZ | NOT NULL, DEFAULT now() | 생성일시 |
+| updated_at     | TIMESTAMPTZ | NOT NULL, DEFAULT now() | 수정일시 |
 
 ### projects
 
@@ -57,6 +47,7 @@
 | api_spec | TEXT | NOT NULL | API 스펙 마크다운 |
 | architecture | TEXT | NOT NULL | 아키텍처 마크다운 |
 | user_feedback | TEXT | NULL | 사용자 수정 요청 내용 |
+| directory_structure | JSONB | NOT NULL | Phase 1 생성 디렉토리 구조 [{path, role, dependencies}] |
 | is_confirmed | BOOLEAN | NOT NULL, DEFAULT false | 사용자 확정 여부 |
 | created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | 생성일시 |
 
@@ -86,8 +77,6 @@
 | description | TEXT | NOT NULL | 구현 내용 설명 |
 | order_index | INTEGER | NOT NULL | 실행 순서 |
 | status | VARCHAR(20) | NOT NULL, CHECK(...) | 태스크 상태 |
-| generated_test_code | TEXT | NULL | 생성된 테스트 코드 |
-| generated_impl_code | TEXT | NULL | 생성된 구현 코드 |
 | created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | 생성일시 |
 | updated_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | 수정일시 |
 
@@ -107,14 +96,6 @@ erDiagram
         TEXT encrypted_api_key
         TIMESTAMPTZ created_at
         TIMESTAMPTZ updated_at
-    }
-
-    refresh_tokens {
-        UUID id PK
-        UUID user_id FK
-        VARCHAR token_hash UK
-        TIMESTAMPTZ expires_at
-        TIMESTAMPTZ created_at
     }
 
     projects {
@@ -139,6 +120,7 @@ erDiagram
         TEXT api_spec
         TEXT architecture
         TEXT user_feedback
+        JSONB directory_structure
         BOOLEAN is_confirmed
         TIMESTAMPTZ created_at
     }
@@ -161,13 +143,10 @@ erDiagram
         TEXT description
         INTEGER order_index
         VARCHAR status
-        TEXT generated_test_code
-        TEXT generated_impl_code
         TIMESTAMPTZ created_at
         TIMESTAMPTZ updated_at
     }
 
-    users ||--o{ refresh_tokens : "has"
     users ||--o{ projects : "owns"
     projects ||--o{ analysis_documents : "has"
     projects ||--o{ pipeline_runs : "has"
@@ -182,7 +161,6 @@ erDiagram
 | 테이블 | 인덱스 | 목적 |
 |--------|--------|------|
 | users | `UNIQUE (github_id)` | GitHub OAuth 로그인 시 사용자 조회 |
-| refresh_tokens | `UNIQUE (token_hash)`, `INDEX (user_id)`, `INDEX (expires_at)` | 토큰 검증, 사용자별 조회, 만료 토큰 정리 |
 | projects | `INDEX (user_id)`, `INDEX (status)` | 사용자별 프로젝트 목록, 상태별 조회 |
 | analysis_documents | `INDEX (project_id, version DESC)` | 최신 버전 문서 빠른 조회 |
 | pipeline_runs | `INDEX (project_id, started_at DESC)` | 프로젝트별 최근 실행 조회 |
@@ -195,5 +173,5 @@ erDiagram
 - `users.encrypted_api_key`: NULL 허용 (API Key 미등록 상태 가능)
 - `projects.github_repo_url`: NULL 허용 (코드 생성 완료 전)
 - `analysis_documents`: 프로젝트당 여러 버전 존재 가능 (피드백 루프)
-- `tasks.generated_test_code`: NULL 허용 (태스크 생성 후 코드 생성 전)
+- 생성된 코드 파일은 S3에 디렉토리 구조 그대로 보관 (`generated/{projectId}/`), DB에 별도 저장 없음
 - 소프트 삭제(soft delete) 미적용 — MVP에서는 물리 삭제

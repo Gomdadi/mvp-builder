@@ -4,6 +4,8 @@
 > **기간**: 4일
 > **제외**: 인증(E3), 사용자 관리(E4), 프로젝트 CRUD(E5), 프론트엔드(E10), 테스트 자동화(E11)
 
+> **[Sprint 1 API 인증 정책]** `docs/03/api-spec.md`의 모든 엔드포인트는 `[인증 필수]`로 정의되어 있으나, Sprint 1에서는 인증을 제외하므로 전체 엔드포인트를 `[공개]`로 운영한다. Sprint 2(E3 인증 구현) 완료 후 원복 예정.
+
 ---
 
 ## 에픽 목록
@@ -48,16 +50,16 @@
 
 ### E2: 데이터베이스
 
-#### T-E2-01: Prisma 스키마 정의 (파이프라인 테이블)
+#### T-E2-01: Prisma 스키마 정의 (파이프라인 테이블) ✅
 - **유형**: 개발
 - **설명**: 파이프라인 실행에 필요한 3개 테이블 정의. 사용자·인증 테이블은 Sprint 2에서 추가
 - **선행 태스크**: T-E1-02
 - **완료 기준**:
-  - [ ] `analysis_documents` 모델 정의 — `directory_structure` JSONB 컬럼 포함
-  - [ ] `pipeline_runs` 모델 정의
-  - [ ] `tasks` 모델 정의 — `status` 필드 (PENDING/IN_PROGRESS/DONE/FAILED) 포함
-  - [ ] INDEX 정의
-  - [ ] `prisma migrate dev` 성공
+  - [x] `analysis_documents` 모델 정의 — `directory_structure` JSONB 컬럼 포함
+  - [x] `pipeline_runs` 모델 정의
+  - [x] `tasks` 모델 정의 — `status` 필드 (PENDING/IN_PROGRESS/DONE/FAILED) 포함
+  - [x] INDEX 정의
+  - [x] `prisma migrate dev` 성공
 
 ---
 
@@ -107,15 +109,15 @@
 
 ### E7: 파이프라인 오케스트레이션
 
-#### T-E7-01: BullMQ 세팅 및 Pipeline Worker 구현
+#### T-E7-01: BullMQ 세팅 및 Pipeline Worker 구현 ✅
 - **유형**: 개발
 - **설명**: `bullmq` + `@nestjs/bullmq` 설치, Pipeline Queue, Pipeline Worker(Consumer)
 - **선행 태스크**: T-E1-02
 - **완료 기준**:
-  - [ ] `POST /v1/pipeline/start` → BullMQ 잡 등록 → 202 즉시 응답
-  - [ ] Pipeline Worker가 잡을 소비하여 PipelineService 실행
-  - [ ] BullMQ retry 설정 (최대 재시도 횟수, backoff 전략)
-  - [ ] Unit Test: 잡 등록 및 Worker 소비 흐름
+  - [x] `POST /v1/pipeline/start` → BullMQ 잡 등록 → 202 즉시 응답
+  - [x] Pipeline Worker가 잡을 소비하여 PipelineService 실행
+  - [x] BullMQ retry 설정 (attempts: 3, exponential backoff delay: 2000ms)
+  - [x] Unit Test: 잡 등록 및 Worker 소비 흐름 (3 cases)
 
 #### T-E7-02: PipelineService 상태 머신 및 resume 전략 구현
 - **유형**: 개발
@@ -202,8 +204,8 @@ flowchart TD
 |--------|------|
 | T-E1-01 모노레포 구조 생성 | ✅ |
 | T-E1-02 Docker Compose | ✅ |
-| T-E2-01 Prisma 스키마 (파이프라인 4개 테이블) | ⬜ |
-| T-E7-01 BullMQ 세팅 + Pipeline Worker | ⬜ |
+| T-E2-01 Prisma 스키마 (파이프라인 4개 테이블) | ✅ |
+| T-E7-01 BullMQ 세팅 + Pipeline Worker | ✅ |
 
 **완료 기준**: `docker compose up` + `POST /v1/pipeline/start` → 202 응답 확인
 

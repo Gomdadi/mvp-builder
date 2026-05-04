@@ -1,0 +1,129 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Enums ──────────────────────────────────────────────────────────────────
+
+enum ProjectStatus {
+  CREATED
+  ANALYZING
+  AWAITING_REVIEW
+  GENERATING
+  COMPLETED
+  FAILED
+}
+
+enum PipelinePhase {
+  PHASE_1
+  PHASE_2
+  PHASE_3
+}
+
+enum PipelineStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  DONE
+  FAILED
+}
+
+// ── Models ─────────────────────────────────────────────────────────────────
+
+model User {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  githubId     String    @unique @map("github_id") @db.VarChar(100)
+  githubLogin  String    @map("github_login") @db.VarChar(100)
+  avatarUrl    String?   @map("avatar_url")
+  claudeApiKey String?   @map("claude_api_key")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  projects Project[]
+
+  @@map("users")
+}
+
+model Project {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String        @map("user_id") @db.Uuid
+  name           String        @db.VarChar(200)
+  description    String?
+  requirements   String
+  techStack      Json          @map("tech_stack")
+  status         ProjectStatus @default(CREATED)
+  githubRepoUrl  String?       @map("github_repo_url")
+  githubRepoName String?       @map("github_repo_name") @db.VarChar(200)
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user              User               @relation(fields: [userId], references: [id])
+  analysisDocuments AnalysisDocument[]
+  pipelineRuns      PipelineRun[]
+  tasks             Task[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("projects")
+}
+
+model AnalysisDocument {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId          String   @map("project_id") @db.Uuid
+  version            Int      @default(1)
+  erd                String
+  apiSpec            String   @map("api_spec")
+  architecture       String
+  userFeedback       String?  @map("user_feedback")
+  directoryStructure Json     @map("directory_structure")
+  isConfirmed        Boolean  @default(false) @map("is_confirmed")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([projectId, version(sort: Desc)])
+  @@map("analysis_documents")
+}
+
+model PipelineRun {
+  id           String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId    String         @map("project_id") @db.Uuid
+  phase        PipelinePhase
+  status       PipelineStatus
+  startedAt    DateTime       @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt  DateTime?      @map("completed_at") @db.Timestamptz(6)
+  errorMessage String?        @map("error_message")
+
+  project Project @relation(fields: [projectId], references: [id])
+  tasks   Task[]
+
+  @@index([projectId, startedAt(sort: Desc)])
+  @@map("pipeline_runs")
+}
+
+model Task {
+  id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId     String     @map("project_id") @db.Uuid
+  pipelineRunId String     @map("pipeline_run_id") @db.Uuid
+  name          String     @db.VarChar(300)
+  description   String
+  orderIndex    Int        @map("order_index")
+  status        TaskStatus @default(PENDING)
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  project     Project     @relation(fields: [projectId], references: [id])
+  pipelineRun PipelineRun @relation(fields: [pipelineRunId], references: [id])
+
+  @@index([pipelineRunId, orderIndex])
+  @@map("tasks")
+}

@@ -65,16 +65,16 @@
 
 ### E6: Claude Agent 서비스
 
-#### T-E6-01: `@anthropic-ai/sdk` 래퍼 구현
+#### T-E6-01: `@anthropic-ai/sdk` 래퍼 구현 ✅
 - **유형**: 개발
 - **설명**: `ClaudeAgentService` 클래스. `.env`의 `CLAUDE_API_KEY` 직접 사용. tool use로 에이전트·스킬 정의
 - **선행 태스크**: T-E2-01
 - **완료 기준**:
-  - [ ] `.env`의 `CLAUDE_API_KEY`로 Anthropic 클라이언트 초기화
-  - [ ] tool use 스키마 정의 및 tool_use 블록 핸들링 로직 구현
-  - [ ] 스트리밍 응답을 AsyncIterator로 노출
-  - [ ] 타임아웃(`CLAUDE_API_TIMEOUT`) 및 재시도(`CLAUDE_API_MAX_RETRIES`) 적용
-  - [ ] Unit Test: Claude API mock으로 정상/실패 케이스
+  - [x] `.env`의 `CLAUDE_API_KEY`로 Anthropic 클라이언트 초기화
+  - [x] tool use 스키마 정의 및 tool_use 블록 핸들링 로직 구현
+  - [x] 스트리밍 응답을 AsyncIterator로 노출
+  - [x] 타임아웃(`CLAUDE_API_TIMEOUT`) 및 재시도(`CLAUDE_API_MAX_RETRIES`) 적용
+  - [x] Unit Test: Claude API mock으로 정상/실패 케이스
 
 #### T-E6-02: Phase 1 분석 문서 생성 프롬프트
 - **유형**: 개발
@@ -212,7 +212,7 @@ flowchart TD
 ### Day 2 — Claude + SSE
 | 태스크 | 상태 |
 |--------|------|
-| T-E6-01 `@anthropic-ai/sdk` 래퍼 | ⬜ |
+| T-E6-01 `@anthropic-ai/sdk` 래퍼 | ✅ |
 | T-E6-02 Phase 1 프롬프트 | ⬜ |
 | T-E6-03 Phase 2 프롬프트 | ⬜ |
 | T-E8-01 SSE Gateway | ⬜ |

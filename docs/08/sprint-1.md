@@ -76,15 +76,15 @@
   - [x] 타임아웃(`CLAUDE_API_TIMEOUT`) 및 재시도(`CLAUDE_API_MAX_RETRIES`) 적용
   - [x] Unit Test: Claude API mock으로 정상/실패 케이스
 
-#### T-E6-02: Phase 1 분석 문서 생성 프롬프트
+#### T-E6-02: Phase 1 분석 문서 생성 프롬프트 ✅
 - **유형**: 개발
 - **설명**: 요구사항 + 기술 스택 → ERD, API 스펙, 아키텍처 마크다운 + 디렉토리 구조 JSON 생성
 - **선행 태스크**: T-E6-01
 - **완료 기준**:
-  - [ ] 출력: ERD(mermaid), API 스펙, 아키텍처 마크다운 섹션
-  - [ ] 기술 스택에 맞는 디렉토리 구조를 `[{path, role, dependencies}]` JSON으로 출력
-  - [ ] 분석 문서 + 디렉토리 구조 DB 저장
-  - [ ] Unit Test: 프롬프트 → 파싱 로직
+  - [x] 출력: ERD(mermaid), API 스펙, 아키텍처 마크다운 섹션
+  - [x] 기술 스택에 맞는 디렉토리 구조를 `[{path, role, dependencies}]` JSON으로 출력
+  - [x] 분석 문서 + 디렉토리 구조 DB 저장
+  - [x] Unit Test: 프롬프트 → 파싱 로직
 
 #### T-E6-03: Phase 2 태스크 분해 프롬프트
 - **유형**: 개발
@@ -213,7 +213,7 @@ flowchart TD
 | 태스크 | 상태 |
 |--------|------|
 | T-E6-01 `@anthropic-ai/sdk` 래퍼 | ✅ |
-| T-E6-02 Phase 1 프롬프트 | ⬜ |
+| T-E6-02 Phase 1 프롬프트 | ✅ |
 | T-E6-03 Phase 2 프롬프트 | ⬜ |
 | T-E8-01 SSE Gateway | ⬜ |
 

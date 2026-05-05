@@ -8,6 +8,21 @@ export interface ToolResult {
   toolInput: unknown;
 }
 
+// runAgentLoop()의 옵션
+export interface AgentLoopOptions {
+  messages: Anthropic.MessageParam[];
+  system?: string;
+  // 에이전트가 순서대로 호출할 툴 목록
+  tools: Anthropic.Tool[];
+  // 각 tool_use 블록이 발생할 때 호출되는 콜백.
+  // toolName: Claude가 호출한 툴 이름, toolInput: Claude가 생성한 JSON
+  // 반환값: Claude에게 돌려줄 tool_result 문자열 (다음 툴 호출의 맥락이 됨)
+  onToolCall: (toolName: string, toolInput: unknown) => Promise<string> | string;
+  maxTokens?: number;
+  // 무한 루프 방지용 최대 API 호출 횟수. 기본값 10
+  maxIterations?: number;
+}
+
 // ClaudeAgentService가 받는 공통 옵션
 // Anthropic Messages API 스펙: https://docs.anthropic.com/en/api/messages
 export interface ClaudeCallOptions {
@@ -103,6 +118,69 @@ export class ClaudeAgentService {
 
     this.logger.debug(`Tool called: ${toolUseBlock.name}`);
     return { toolName: toolUseBlock.name, toolInput: toolUseBlock.input };
+  }
+
+  // 여러 툴을 순서대로 호출하는 에이전트 루프.
+  // Claude가 tool_use를 반환하면 onToolCall 콜백을 실행하고 결과를 tool_result로 전달,
+  // stop_reason이 end_turn이 될 때까지 반복함.
+  //
+  // 대화 흐름:
+  // user 메시지 → Claude(tool_use #1) → tool_result 전달
+  //             → Claude(tool_use #2) → tool_result 전달
+  //             → Claude(end_turn) → 루프 종료
+  //
+  // tool_choice: 'auto' — Claude가 어떤 툴을 언제 호출할지 스스로 판단.
+  // 시스템 프롬프트에서 호출 순서를 지시해야 올바른 순서 보장됨.
+  async runAgentLoop(options: AgentLoopOptions): Promise<void> {
+    const { messages, system, tools, onToolCall, maxTokens = 8192, maxIterations = 10 } = options;
+
+    // 대화 히스토리 — 루프를 돌며 assistant 응답과 tool_result가 누적됨
+    const history: Anthropic.MessageParam[] = [...messages];
+
+    for (let i = 0; i < maxIterations; i++) {
+      const response = await this.client.messages.create({
+        model: this.model,
+        max_tokens: maxTokens, messages: history,
+        // system이 있을 때만 { system: system }을 펼쳐 포함시킴.
+        // system && { system }: system이 truthy면 { system: '...' } 반환, falsy면 undefined 반환.
+        // ...undefined는 아무 프로퍼티도 추가하지 않으므로 system이 없으면 키 자체가 생략됨.
+        ...(system && { system }),
+        // tools는 { tools: tools }의 축약형 (ES6 단축 프로퍼티명)
+        tools,
+        // auto: Claude가 툴 사용 여부와 순서를 결정. 시스템 프롬프트로 순서 유도
+        tool_choice: { type: 'auto' },
+      } as Anthropic.MessageCreateParamsNonStreaming);
+
+      // assistant 응답을 히스토리에 추가 — 다음 호출 시 Claude가 이전 응답을 맥락으로 활용
+      history.push({ role: 'assistant', content: response.content });
+
+      if (response.stop_reason === 'end_turn') break;
+
+      if (response.stop_reason === 'tool_use') {
+        // 한 번의 응답에 여러 tool_use 블록이 있을 수 있으므로 전부 처리
+        const toolResults: Anthropic.ToolResultBlockParam[] = [];
+
+        for (const block of response.content) {
+          if (block.type === 'tool_use') {
+            this.logger.debug(`Tool called: ${block.name}`);
+            const result = await onToolCall(block.name, block.input);
+            toolResults.push({
+              type: 'tool_result',
+              // tool_use_id: Claude가 발급한 ID — tool_result와 tool_use를 연결하는 키
+              tool_use_id: block.id,
+              content: result,
+            });
+          }
+        }
+
+        // tool_result를 user 메시지로 전달 — Claude가 결과를 보고 다음 툴을 호출
+        history.push({ role: 'user', content: toolResults });
+      }
+
+      if (i === maxIterations - 1) {
+        this.logger.warn(`runAgentLoop reached maxIterations(${maxIterations}) without end_turn`);
+      }
+    }
   }
 
   // stream()과 runWithTool() 양쪽에서 공통으로 쓰는 Anthropic API 파라미터를 조립.

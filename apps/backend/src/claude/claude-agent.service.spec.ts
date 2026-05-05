@@ -107,6 +107,109 @@ describe('ClaudeAgentService', () => {
     });
   });
 
+  describe('runAgentLoop', () => {
+    const tools = [
+      { name: 'tool_a', description: 'Tool A', input_schema: { type: 'object' as const } },
+      { name: 'tool_b', description: 'Tool B', input_schema: { type: 'object' as const } },
+    ];
+
+    it('tool_use → tool_result 전달 → end_turn 순서로 루프를 실행한다', async () => {
+      const onToolCall = jest.fn().mockResolvedValue('tool result');
+
+      // 1번 API 호출: tool_a 호출
+      mockCreate.mockResolvedValueOnce({
+        content: [{ type: 'tool_use', id: 'call-1', name: 'tool_a', input: { value: 'a' } }],
+        stop_reason: 'tool_use',
+      });
+      // 2번 API 호출: tool_b 호출
+      mockCreate.mockResolvedValueOnce({
+        content: [{ type: 'tool_use', id: 'call-2', name: 'tool_b', input: { value: 'b' } }],
+        stop_reason: 'tool_use',
+      });
+      // 3번 API 호출: end_turn (루프 종료)
+      mockCreate.mockResolvedValueOnce({
+        content: [{ type: 'text', text: 'done' }],
+        stop_reason: 'end_turn',
+      });
+
+      await service.runAgentLoop({
+        messages: [{ role: 'user', content: 'start' }],
+        tools,
+        onToolCall,
+      });
+
+      // onToolCall이 tool_a, tool_b 순서로 호출됐는지 검증
+      expect(onToolCall).toHaveBeenCalledTimes(2);
+      expect(onToolCall).toHaveBeenNthCalledWith(1, 'tool_a', { value: 'a' });
+      expect(onToolCall).toHaveBeenNthCalledWith(2, 'tool_b', { value: 'b' });
+      // messages.create()가 총 3번 호출됐는지 검증 (tool_a + tool_b + end_turn)
+      expect(mockCreate).toHaveBeenCalledTimes(3);
+    });
+
+    it('tool_result를 올바른 tool_use_id와 함께 다음 API 호출에 포함한다', async () => {
+      const onToolCall = jest.fn().mockResolvedValue('result content');
+
+      mockCreate.mockResolvedValueOnce({
+        content: [{ type: 'tool_use', id: 'my-id-123', name: 'tool_a', input: {} }],
+        stop_reason: 'tool_use',
+      });
+      mockCreate.mockResolvedValueOnce({
+        content: [],
+        stop_reason: 'end_turn',
+      });
+
+      await service.runAgentLoop({
+        messages: [{ role: 'user', content: 'go' }],
+        tools,
+        onToolCall,
+      });
+
+      // mockCreate.mock.calls: 호출 기록 2차원 배열
+      // [1]     → 2번째 API 호출 (tool_a 결과를 전달하는 호출)
+      // [0]     → 첫 번째 인자 (messages.create에 넘긴 파라미터 객체)
+      // .messages → 그 파라미터 안의 messages 배열
+      // 이 시점 messages 구조: [user(초기), assistant(tool_use), user(tool_result)]
+      const secondCallMessages = mockCreate.mock.calls[1][0].messages;
+
+      // messages 배열에서 tool_result를 담은 user 메시지를 찾음.
+      // tool_result 메시지는 content가 배열이고 첫 번째 요소의 type이 'tool_result'인 것으로 식별.
+      // Array.isArray 체크: content가 문자열인 메시지(일반 user 메시지)와 구분하기 위함
+      const toolResultMessage = secondCallMessages.find(
+        (m: Anthropic.MessageParam) =>
+          Array.isArray(m.content) &&
+          (m.content as Anthropic.ToolResultBlockParam[])[0]?.type === 'tool_result',
+      );
+
+      // tool_result 블록이 올바른 tool_use_id와 content를 갖는지 검증.
+      // tool_use_id: Claude가 tool_use 블록에서 발급한 'my-id-123' — 어떤 툴 호출에 대한 결과인지 연결하는 키
+      // content: onToolCall이 반환한 'result content' 문자열
+      expect(toolResultMessage.content[0]).toMatchObject({
+        type: 'tool_result',
+        tool_use_id: 'my-id-123',
+        content: 'result content',
+      });
+    });
+
+    it('maxIterations에 도달하면 루프를 종료한다', async () => {
+      // 항상 tool_use를 반환 → end_turn 없이 계속 반복되는 상황
+      mockCreate.mockResolvedValue({
+        content: [{ type: 'tool_use', id: 'id', name: 'tool_a', input: {} }],
+        stop_reason: 'tool_use',
+      });
+      const onToolCall = jest.fn().mockResolvedValue('ok');
+
+      await service.runAgentLoop({
+        messages: [{ role: 'user', content: 'go' }],
+        tools,
+        onToolCall,
+        maxIterations: 3,
+      });
+
+      // maxIterations(3)번만 호출되고 종료됐는지 검증
+      expect(mockCreate).toHaveBeenCalledTimes(3);
+    });
+  });
+
   describe('stream', () => {
     // stream()이 Anthropic SDK의 이벤트를 순서 그대로 yield하는지 검증
     it('stream 이벤트를 AsyncGenerator로 순서대로 yield한다', async () => {

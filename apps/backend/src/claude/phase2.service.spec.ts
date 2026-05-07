@@ -31,8 +31,9 @@ const confirmedDoc = {
 
 // Claude가 반환할 가짜 태스크 목록
 const fakeTasks = [
-  { name: 'Setup Prisma schema', description: 'Define all models', order_index: 1 },
-  { name: 'Implement UserService', description: 'CRUD for users', order_index: 2 },
+  { name: 'Setup Prisma schema', description: 'Define all models', order_index: 1, type: 'BACKEND' as const },
+  { name: 'Implement UserService', description: 'CRUD for users', order_index: 2, type: 'BACKEND' as const },
+  { name: 'Implement LoginPage', description: 'Login UI component', order_index: 3, type: 'FRONTEND' as const },
 ];
 
 describe('Phase2Service', () => {
@@ -72,11 +73,12 @@ describe('Phase2Service', () => {
         expect.objectContaining({ toolName: 'generate_tasks' }),
       );
       // createMany에 올바른 데이터가 넘어갔는지 검증
-      // order_index(Claude 반환) → orderIndex(Prisma 필드명) 변환 확인
+      // order_index(Claude 반환) → orderIndex(Prisma 필드명) 변환 및 type 저장 확인
       expect(mockPrisma.task.createMany).toHaveBeenCalledWith({
         data: [
-          expect.objectContaining({ name: 'Setup Prisma schema', orderIndex: 1 }),
-          expect.objectContaining({ name: 'Implement UserService', orderIndex: 2 }),
+          expect.objectContaining({ name: 'Setup Prisma schema', orderIndex: 1, type: 'BACKEND' }),
+          expect.objectContaining({ name: 'Implement UserService', orderIndex: 2, type: 'BACKEND' }),
+          expect.objectContaining({ name: 'Implement LoginPage', orderIndex: 3, type: 'FRONTEND' }),
         ],
       });
     });

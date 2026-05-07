@@ -37,6 +37,11 @@ enum TaskStatus {
   FAILED
 }
 
+enum TaskType {
+  BACKEND
+  FRONTEND
+}
+
 // ── Models ─────────────────────────────────────────────────────────────────
 
 model User {
@@ -85,6 +90,7 @@ model AnalysisDocument {
   architecture       String
   userFeedback       String?  @map("user_feedback")
   directoryStructure Json     @map("directory_structure")
+  designSystem       String?  @map("design_system")
   isConfirmed        Boolean  @default(false) @map("is_confirmed")
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
@@ -118,6 +124,7 @@ model Task {
   description   String
   orderIndex    Int        @map("order_index")
   status        TaskStatus @default(PENDING)
+  type          TaskType   @default(BACKEND)
   createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 

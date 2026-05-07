@@ -86,24 +86,29 @@
   - [x] 분석 문서 + 디렉토리 구조 DB 저장
   - [x] Unit Test: 프롬프트 → 파싱 로직
 
-#### T-E6-03: Phase 2 태스크 분해 프롬프트
+#### T-E6-03: Phase 2 태스크 분해 프롬프트 ✅
 - **유형**: 개발
 - **설명**: 확정된 분석 문서 → 태스크 목록 JSON 생성
 - **선행 태스크**: T-E6-01
 - **완료 기준**:
-  - [ ] 출력: `[{name, description, order_index}]` JSON 배열
-  - [ ] 태스크 DB 저장
-  - [ ] Unit Test: 파싱 로직
+  - [x] 출력: `[{name, description, type, order_index}]` JSON 배열 (`type`: BACKEND/FRONTEND 구분)
+  - [x] 태스크 DB 저장 (`TaskType` enum 포함)
+  - [x] Unit Test: 파싱 로직 (3 cases)
 
-#### T-E6-04: Phase 3 TDD 코드 생성 프롬프트
+#### T-E6-04: Phase 3 코드 생성 프롬프트 ✅
 - **유형**: 개발
-- **설명**: Phase 1 확정 디렉토리 구조 프롬프트 주입 → 태스크별 테스트 코드 → 구현 코드 → 리팩터링
+- **설명**: 태스크 타입(BACKEND/FRONTEND)에 따라 분기 — 백엔드는 TDD(테스트→구현), 프론트엔드는 디자인 시스템 주입 후 컴포넌트 단건 생성
 - **선행 태스크**: T-E6-01
 - **완료 기준**:
-  - [ ] DB에서 디렉토리 구조 조회 → `파일 경로 + 역할 + 의존성` 프롬프트 주입
-  - [ ] 테스트 코드 → 구현 코드 순서 보장
-  - [ ] 생성된 코드 S3 업로드 (`generated/{projectId}/{path}`) — 디렉토리 구조 그대로 유지
-  - [ ] Unit Test: 파싱 및 S3 업로드 로직
+  - [x] DB에서 디렉토리 구조 조회 → `파일 경로 + 역할 + 의존성` 프롬프트 주입
+  - [x] 백엔드: `generate_test_code` → `generate_implementation_code` 순서 보장 (TDD)
+  - [x] 프론트엔드: Phase 1에서 생성한 `designSystem` 주입 → `generate_ui_component` 단건 호출
+  - [x] Task 상태 추적: 실행 시작 `IN_PROGRESS`, 완료 `DONE`, 실패 `FAILED` DB 갱신
+  - [x] 생성된 코드 S3 업로드 (`generated/{projectId}/{path}`)
+  - [x] Unit Test: 정상/실패/불완전 케이스 (8 cases)
+- **스키마 추가**:
+  - [x] `TaskType` enum (`BACKEND` / `FRONTEND`), `Task.type` 필드
+  - [x] `AnalysisDocument.designSystem` 필드 (Phase 1에서 `ui-ux-skill` 호출 결과 저장)
 
 ---
 
@@ -214,7 +219,7 @@ flowchart TD
 |--------|------|
 | T-E6-01 `@anthropic-ai/sdk` 래퍼 | ✅ |
 | T-E6-02 Phase 1 프롬프트 | ✅ |
-| T-E6-03 Phase 2 프롬프트 | ⬜ |
+| T-E6-03 Phase 2 프롬프트 | ✅ |
 | T-E8-01 SSE Gateway | ⬜ |
 
 **완료 기준**: Phase 1 문서 생성 + SSE 스트리밍 동작 확인
@@ -222,7 +227,7 @@ flowchart TD
 ### Day 3 — 파이프라인 완성 + GitHub
 | 태스크 | 상태 |
 |--------|------|
-| T-E6-04 Phase 3 코드 생성 + S3 | ⬜ |
+| T-E6-04 Phase 3 코드 생성 + S3 | ✅ |
 | T-E7-02 PipelineService + resume | ⬜ |
 | T-E9-01 GitHub Service | ⬜ |
 

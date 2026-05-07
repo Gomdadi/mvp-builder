@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import { execFileSync } from 'child_process';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Phase1Service } from './phase1.service';
 import { ClaudeAgentService } from './claude-agent.service';
@@ -10,6 +11,10 @@ jest.mock('fs');
 const mockReadFileSync = fs.readFileSync as jest.Mock;
 // static 필드(TOOL_ERD 등) 초기화 시점에도 호출되므로 모듈 로드 직후 기본값 설정
 mockReadFileSync.mockReturnValue('mocked system prompt');
+
+// child_process mock — 실제 Python 실행 없이 search.py 결과를 시뮬레이션
+jest.mock('child_process', () => ({ execFileSync: jest.fn() }));
+const mockExecFileSync = execFileSync as jest.Mock;
 
 // ClaudeAgentService mock — 실제 Claude API 호출 없이 onToolCall 콜백만 테스트
 const mockClaudeAgent = { runAgentLoop: jest.fn() };
@@ -35,6 +40,9 @@ describe('Phase1Service', () => {
     jest.clearAllMocks();
     // clearAllMocks가 mockReturnValue도 초기화하므로 매 테스트 전에 재설정
     mockReadFileSync.mockReturnValue('mocked system prompt');
+    // UI_UX_SKILL_PATH 기본값 설정 — 각 테스트에서 필요시 override
+    process.env.UI_UX_SKILL_PATH = '/mock/skill/path';
+    mockExecFileSync.mockReturnValue('# Mock Design System\n## Colors\n- Primary: #3B82F6');
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -77,8 +85,61 @@ describe('Phase1Service', () => {
           version: 1,
           erd: 'erDiagram\n  User {}',
           apiSpec: '## API\nGET /users',
-          userFeedback: null, // feedback 없으면 null
+          userFeedback: null,
         }),
+      });
+      expect(result).toBe('doc-1');
+    });
+
+    // design system 케이스: UI_UX_SKILL_PATH가 설정되면 search.py 결과가 저장됨
+    it('UI_UX_SKILL_PATH가 설정되면 design system을 생성해 저장한다', async () => {
+      mockPrisma.project.findUniqueOrThrow.mockResolvedValue(project);
+      mockPrisma.analysisDocument.count.mockResolvedValue(0);
+      mockPrisma.analysisDocument.create.mockResolvedValue({ id: 'doc-1' });
+      mockClaudeAgent.runAgentLoop.mockImplementation(simulateAgentLoop);
+
+      await service.run('proj-1');
+
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'python3',
+        expect.arrayContaining(['--design-system', '-f', 'markdown']),
+        expect.objectContaining({ encoding: 'utf-8' }),
+      );
+      expect(mockPrisma.analysisDocument.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          designSystem: '# Mock Design System\n## Colors\n- Primary: #3B82F6',
+        }),
+      });
+    });
+
+    // UI_UX_SKILL_PATH 미설정 케이스: 환경변수 없으면 designSystem은 null로 저장
+    it('UI_UX_SKILL_PATH가 없으면 designSystem을 null로 저장한다', async () => {
+      delete process.env.UI_UX_SKILL_PATH;
+      mockPrisma.project.findUniqueOrThrow.mockResolvedValue(project);
+      mockPrisma.analysisDocument.count.mockResolvedValue(0);
+      mockPrisma.analysisDocument.create.mockResolvedValue({ id: 'doc-1' });
+      mockClaudeAgent.runAgentLoop.mockImplementation(simulateAgentLoop);
+
+      await service.run('proj-1');
+
+      expect(mockExecFileSync).not.toHaveBeenCalled();
+      expect(mockPrisma.analysisDocument.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ designSystem: null }),
+      });
+    });
+
+    // search.py 실패 케이스: execFileSync 예외 발생 시 null로 fallback, Phase 1은 계속 진행
+    it('search.py 실패 시 designSystem을 null로 저장하고 Phase 1은 계속 진행한다', async () => {
+      mockExecFileSync.mockImplementation(() => { throw new Error('python3 not found'); });
+      mockPrisma.project.findUniqueOrThrow.mockResolvedValue(project);
+      mockPrisma.analysisDocument.count.mockResolvedValue(0);
+      mockPrisma.analysisDocument.create.mockResolvedValue({ id: 'doc-1' });
+      mockClaudeAgent.runAgentLoop.mockImplementation(simulateAgentLoop);
+
+      const result = await service.run('proj-1');
+
+      expect(mockPrisma.analysisDocument.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ designSystem: null }),
       });
       expect(result).toBe('doc-1');
     });

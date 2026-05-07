@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { execFileSync } from 'child_process';
 import { Injectable, Logger } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
 import { ClaudeAgentService } from './claude-agent.service';
@@ -186,6 +187,9 @@ export class Phase1Service {
       throw new Error(`Phase 1 incomplete — missing: ${Object.keys(result).join(', ')}`);
     }
 
+    const query = `${project.name} ${project.requirements}`.slice(0, 400);
+    const designSystem = this.generateDesignSystem(query);
+
     const doc = await this.prisma.analysisDocument.create({
       data: {
         projectId,
@@ -194,6 +198,7 @@ export class Phase1Service {
         apiSpec: result.apiSpec,
         architecture: result.architecture,
         directoryStructure: result.directoryStructure,
+        designSystem: designSystem ?? null,
         // userFeedback이 없으면 null 저장 — undefined는 Prisma가 허용하지 않음
         userFeedback: userFeedback ?? null,
       },
@@ -201,5 +206,25 @@ export class Phase1Service {
 
     this.logger.log(`Phase 1 complete — docId=${doc.id} version=${version}`);
     return doc.id;
+  }
+
+  // UI_UX_SKILL_PATH 환경변수가 없거나 search.py 실행 실패 시 null 반환 — Phase 1 흐름은 중단하지 않음
+  private generateDesignSystem(query: string): string | null {
+    const skillPath = process.env.UI_UX_SKILL_PATH;
+    if (!skillPath) {
+      this.logger.warn('UI_UX_SKILL_PATH not set — skipping design system generation');
+      return null;
+    }
+
+    try {
+      return execFileSync(
+        'python3',
+        [path.join(skillPath, 'scripts', 'search.py'), query, '--design-system', '-f', 'markdown'],
+        { timeout: 30000, encoding: 'utf-8' },
+      );
+    } catch (e) {
+      this.logger.warn(`Design system generation failed: ${(e as Error).message}`);
+      return null;
+    }
   }
 }

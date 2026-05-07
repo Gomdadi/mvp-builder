@@ -8,7 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 // generate_tasks 툴 호출 시 Claude가 반환하는 JSON 타입.
 // Phase 3에서 이 목록을 순서대로 순회하며 파일별 코드를 생성함
 export interface TaskListInput {
-  tasks: { name: string; description: string; order_index: number }[];
+  tasks: { name: string; description: string; order_index: number; type: 'BACKEND' | 'FRONTEND' }[];
 }
 
 @Injectable()
@@ -46,8 +46,13 @@ export class Phase2Service {
                 // 1부터 시작하는 실행 순서 — 낮은 번호부터 완료해야 다음 태스크 진행 가능
                 description: 'Execution order (1-based). Tasks with no dependencies get the lowest indexes.',
               },
+              type: {
+                type: 'string',
+                enum: ['BACKEND', 'FRONTEND'],
+                description: 'BACKEND for server-side code, FRONTEND for client-side code. Assign based on target file path.',
+              },
             },
-            required: ['name', 'description', 'order_index'],
+            required: ['name', 'description', 'order_index', 'type'],
           },
         },
       },
@@ -121,6 +126,7 @@ export class Phase2Service {
         description: t.description,
         // Claude가 반환한 order_index(snake_case)를 Prisma 필드명(camelCase)으로 변환
         orderIndex: t.order_index,
+        type: t.type,
       })),
     });
 

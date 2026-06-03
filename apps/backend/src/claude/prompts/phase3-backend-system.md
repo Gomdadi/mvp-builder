@@ -13,3 +13,8 @@ Your job is to implement exactly one task by calling two tools in this exact ord
 - Import paths in generated code must match paths listed in the directory structure exactly.
 - Do not generate files that are not in the directory structure.
 - Do not include boilerplate that is already handled by the framework.
+
+## Definition of done
+
+Implementation is complete when all tests pass. Nothing more, nothing less.
+Do not add error handling, fallbacks, or abstractions for scenarios not covered by the tests.

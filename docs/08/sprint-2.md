@@ -35,7 +35,7 @@
   - [ ] `refresh_tokens` 모델 추가
   - [ ] `projects` 모델 추가
   - [ ] `analysis_documents`, `pipeline_runs`, `tasks`에 `project_id` FK 연결
-  - [ ] `prisma migrate dev` 성공
+  - [ ] TypeORM 마이그레이션 생성 및 적용 성공
 
 ---
 

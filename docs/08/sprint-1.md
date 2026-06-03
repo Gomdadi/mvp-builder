@@ -13,7 +13,7 @@
 | 에픽 ID | 에픽명 | 설명 |
 |---------|--------|------|
 | E1 | 프로젝트 초기 설정 | 모노레포 구조, Docker Compose |
-| E2 | 데이터베이스 | Prisma 스키마 (파이프라인 관련 4개 테이블) |
+| E2 | 데이터베이스 | TypeORM 엔티티 정의 (파이프라인 관련 4개 테이블) |
 | E6 | Claude Agent 서비스 | `@anthropic-ai/sdk` 래퍼, Phase 1/2/3 프롬프트 |
 | E7 | 파이프라인 오케스트레이션 | BullMQ, 상태 머신, resume 전략 |
 | E8 | SSE 실시간 스트리밍 | SSE Gateway |
@@ -50,16 +50,16 @@
 
 ### E2: 데이터베이스
 
-#### T-E2-01: Prisma 스키마 정의 (파이프라인 테이블) ✅
+#### T-E2-01: TypeORM 엔티티 정의 (파이프라인 테이블) ✅
 - **유형**: 개발
 - **설명**: 파이프라인 실행에 필요한 3개 테이블 정의. 사용자·인증 테이블은 Sprint 2에서 추가
 - **선행 태스크**: T-E1-02
 - **완료 기준**:
-  - [x] `analysis_documents` 모델 정의 — `directory_structure` JSONB 컬럼 포함
-  - [x] `pipeline_runs` 모델 정의
-  - [x] `tasks` 모델 정의 — `status` 필드 (PENDING/IN_PROGRESS/DONE/FAILED) 포함
+  - [x] `analysis_documents` 엔티티 정의 — `directory_structure` JSONB 컬럼 포함
+  - [x] `pipeline_runs` 엔티티 정의
+  - [x] `tasks` 엔티티 정의 — `status` 필드 (PENDING/IN_PROGRESS/DONE/FAILED) 포함
   - [x] INDEX 정의
-  - [x] `prisma migrate dev` 성공
+  - [x] TypeORM 마이그레이션 생성 및 적용 성공
 
 ---
 
@@ -209,7 +209,7 @@ flowchart TD
 |--------|------|
 | T-E1-01 모노레포 구조 생성 | ✅ |
 | T-E1-02 Docker Compose | ✅ |
-| T-E2-01 Prisma 스키마 (파이프라인 4개 테이블) | ✅ |
+| T-E2-01 TypeORM 엔티티 정의 (파이프라인 4개 테이블) | ✅ |
 | T-E7-01 BullMQ 세팅 + Pipeline Worker | ✅ |
 
 **완료 기준**: `docker compose up` + `POST /v1/pipeline/start` → 202 응답 확인

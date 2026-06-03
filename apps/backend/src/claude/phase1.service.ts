@@ -2,9 +2,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import Anthropic from '@anthropic-ai/sdk';
 import { ClaudeAgentService } from './claude-agent.service';
-import { PrismaService } from '../prisma/prisma.service';
+import { Project } from '../entities/project.entity';
+import { AnalysisDocument } from '../entities/analysis-document.entity';
 
 // 에이전트 루프가 4개 툴 호출을 통해 수집하는 Phase 1 최종 결과 타입
 export interface Phase1Result {
@@ -108,7 +111,8 @@ export class Phase1Service {
 
   constructor(
     private readonly claudeAgent: ClaudeAgentService,
-    private readonly prisma: PrismaService,
+    @InjectRepository(Project) private readonly projectRepo: Repository<Project>,
+    @InjectRepository(AnalysisDocument) private readonly analysisDocumentRepo: Repository<AnalysisDocument>,
   ) {
     this.systemPrompt = Phase1Service.loadPrompt('phase1-system.md');
   }
@@ -118,14 +122,11 @@ export class Phase1Service {
   // userFeedback: 이전 Phase 1 결과에 대한 수정 요청 — 있으면 새 버전으로 재생성
   // 반환값: 생성된 AnalysisDocument의 id
   async run(projectId: string, userFeedback?: string): Promise<string> {
-    const project = await this.prisma.project.findUniqueOrThrow({
-      where: { id: projectId },
-    });
+    // findOneOrFail: 없으면 EntityNotFoundError 발생 (Prisma의 findUniqueOrThrow와 동일)
+    const project = await this.projectRepo.findOneOrFail({ where: { id: projectId } });
 
     // 기존 분석 문서 수로 버전 결정 — 피드백으로 재생성할 때마다 version이 증가
-    const existingCount = await this.prisma.analysisDocument.count({
-      where: { projectId },
-    });
+    const existingCount = await this.analysisDocumentRepo.count({ where: { projectId } });
     const version = existingCount + 1;
 
     this.logger.log(`Phase 1 start — projectId=${projectId} version=${version}`);
@@ -190,8 +191,9 @@ export class Phase1Service {
     const query = `${project.name} ${project.requirements}`.slice(0, 400);
     const designSystem = this.generateDesignSystem(query);
 
-    const doc = await this.prisma.analysisDocument.create({
-      data: {
+    // create(): 엔티티 인스턴스 생성 / save(): DB에 INSERT하고 저장된 엔티티 반환
+    const doc = await this.analysisDocumentRepo.save(
+      this.analysisDocumentRepo.create({
         projectId,
         version,
         erd: result.erd,
@@ -199,10 +201,9 @@ export class Phase1Service {
         architecture: result.architecture,
         directoryStructure: result.directoryStructure,
         designSystem: designSystem ?? null,
-        // userFeedback이 없으면 null 저장 — undefined는 Prisma가 허용하지 않음
         userFeedback: userFeedback ?? null,
-      },
-    });
+      }),
+    );
 
     this.logger.log(`Phase 1 complete — docId=${doc.id} version=${version}`);
     return doc.id;

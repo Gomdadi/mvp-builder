@@ -1,0 +1,64 @@
+import { Column, CreateDateColumn, Entity, Index, ManyToOne, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
+import { User } from './user.entity';
+import { AnalysisDocument } from './analysis-document.entity';
+import { PipelineRun } from './pipeline-run.entity';
+import { Task } from './task.entity';
+import { ProjectStatus } from './enums';
+
+@Entity('projects')
+// @Index: DB 인덱스 생성. Prisma의 @@index([userId]), @@index([status])에 대응
+@Index(['userId'])
+@Index(['status'])
+export class Project {
+  // !: TypeORM이 DB에서 값을 채워주므로 TypeScript의 strictPropertyInitialization 경고를 억제
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  // @Column({ name: 'user_id' }): 외래키 컬럼 이름을 명시
+  // @ManyToOne과 쌍으로 작동 — user_id 컬럼이 users.id를 참조
+  @Column({ name: 'user_id', type: 'uuid' })
+  userId!: string;
+
+  @Column({ length: 200 })
+  name!: string;
+
+  @Column({ nullable: true, type: 'text' })
+  description!: string | null;
+
+  @Column({ type: 'text' })
+  requirements!: string;
+
+  // type: 'jsonb' — JSON 데이터를 PostgreSQL JSONB 타입으로 저장 (Prisma의 Json 타입에 대응)
+  @Column({ name: 'tech_stack', type: 'jsonb' })
+  techStack!: Record<string, unknown>;
+
+  // type: 'enum' — PostgreSQL enum 타입. enum: ProjectStatus로 허용 값을 제한
+  // default: ProjectStatus.CREATED — INSERT 시 기본값
+  @Column({ type: 'enum', enum: ProjectStatus, default: ProjectStatus.CREATED })
+  status!: ProjectStatus;
+
+  @Column({ name: 'github_repo_url', nullable: true })
+  githubRepoUrl!: string | null;
+
+  @Column({ name: 'github_repo_name', length: 200, nullable: true })
+  githubRepoName!: string | null;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
+  updatedAt!: Date;
+
+  // @ManyToOne: 여러 Project가 User 1명에 속함
+  @ManyToOne(() => User, (user) => user.projects)
+  user!: User;
+
+  @OneToMany(() => AnalysisDocument, (doc) => doc.project)
+  analysisDocuments!: AnalysisDocument[];
+
+  @OneToMany(() => PipelineRun, (run) => run.project)
+  pipelineRuns!: PipelineRun[];
+
+  @OneToMany(() => Task, (task) => task.project)
+  tasks!: Task[];
+}

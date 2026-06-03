@@ -55,7 +55,7 @@
   2. `docker compose restart db` 재시작
   3. `docker compose logs db` 에러 확인
 - **근본 원인 조사**: 디스크 용량 확인 (`df -h`), PostgreSQL 로그 확인
-- **복구 확인**: Prisma health check 쿼리 성공, 파이프라인 정상 생성 테스트
+- **복구 확인**: TypeORM DB 연결 확인, 파이프라인 정상 생성 테스트
 
 ---
 
@@ -202,7 +202,7 @@ main 브랜치 머지
 ### 배포 전 체크리스트
 
 - [ ] 환경 변수 및 시크릿 최신 상태 확인
-- [ ] DB 마이그레이션 파일 확인 (`prisma migrate deploy`)
+- [ ] DB 마이그레이션 파일 확인 (`npx typeorm migration:run -d src/data-source.ts`)
 - [ ] Integration Test 전체 통과 확인
 - [ ] 스테이징 환경에서 주요 파이프라인 수동 테스트 완료
 - [ ] 롤백 이미지 태그 메모

@@ -72,11 +72,17 @@ SDD가 확정되기 전까지 구현을 시작하지 않는다.
 
 SDD를 기반으로 레이어별 Agent를 병렬 또는 순차 디스패치해 구현한다.
 
-| 레이어 | 순서 |
-|--------|------|
-| BACKEND | `generate_test_code` → `generate_implementation_code` |
-| FRONTEND | 디자인 시스템 주입 → `generate_ui_component` |
+| 레이어 | 구현 Skill | 테스트 Skill |
+|--------|-----------|-------------|
+| DTO | `nestjs-dto-implement` | `nestjs-dto-test` |
+| Service | `nestjs-service-implement` | `nestjs-service-test` |
+| Controller | `nestjs-controller-implement` | `nestjs-controller-test` |
+| Module | `nestjs-module-implement` | — |
+| Worker | `nestjs-worker-implement` | `nestjs-worker-test` |
 
+구현 순서: DTO → Service (test) → Controller (test) → Module → Worker (test)
+
+- 각 레이어는 implement skill로 구현 후, test skill로 unit test를 작성한다.
 - 각 태스크는 `IN_PROGRESS` → `DONE` / `FAILED` 상태로 추적된다.
 - 실패 시 상태를 `FAILED`로 기록하고 다음 단계로 넘기지 않는다.
 

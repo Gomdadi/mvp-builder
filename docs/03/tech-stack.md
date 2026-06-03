@@ -29,7 +29,7 @@
 | **프레임워크** | NestJS 10+ | **[결정]** 모듈 기반 구조로 파이프라인 단계별 분리 용이, TypeScript 완전 지원, DI 내장 |
 | **언어** | TypeScript 5.x (strict) | 프론트엔드와 타입 공유, `@anthropic-ai/sdk` TypeScript 지원 |
 | **AI 레이어** | `@anthropic-ai/sdk` (Anthropic API SDK) | **[결정]** tool use 기반으로 에이전트·스킬을 코드로 직접 정의·오케스트레이션. Claude Code SDK 대비 흐름 제어 및 예측 가능성 높음 |
-| **ORM** | Prisma | 타입 안전 쿼리, 마이그레이션 관리, PostgreSQL 지원 |
+| **ORM** | TypeORM | 엔티티 기반 타입 안전 쿼리, 마이그레이션 관리, NestJS 공식 지원 |
 | **인증** | Passport.js + JWT | GitHub OAuth 전략 내장, NestJS 공식 지원 |
 | **유효성 검사** | class-validator + class-transformer | NestJS DTO 패턴과 통합 |
 | **SSE** | NestJS SSE (built-in) | AI 생성 진행 상황 스트리밍 전송 |
@@ -79,7 +79,7 @@
 
 ```
 Frontend:  Next.js 14 (App Router) + TypeScript + Tailwind + Zustand
-Backend:   NestJS + TypeScript + Prisma + Passport.js (GitHub OAuth) + BullMQ
+Backend:   NestJS + TypeScript + TypeORM + Passport.js (GitHub OAuth) + BullMQ
 AI Layer:  @anthropic-ai/sdk (TypeScript) — tool use 기반 에이전트·스킬 정의, NestJS 서비스 레이어에 통합
 Database:  PostgreSQL 15 + Redis + AWS S3 (생성 코드 파일)
 Infra:     Docker Compose (로컬/운영) + AWS EC2 + AWS S3 + GitHub Actions

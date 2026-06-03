@@ -1,9 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import Anthropic from '@anthropic-ai/sdk';
 import { ClaudeAgentService } from './claude-agent.service';
-import { PrismaService } from '../prisma/prisma.service';
+import { AnalysisDocument } from '../entities/analysis-document.entity';
+import { Task } from '../entities/task.entity';
+import { TaskType } from '../entities/enums';
 
 // generate_tasks 툴 호출 시 Claude가 반환하는 JSON 타입.
 // Phase 3에서 이 목록을 순서대로 순회하며 파일별 코드를 생성함
@@ -43,8 +47,8 @@ export class Phase2Service {
               },
               order_index: {
                 type: 'integer',
-                // 1부터 시작하는 실행 순서 — 낮은 번호부터 완료해야 다음 태스크 진행 가능
-                description: 'Execution order (1-based). Tasks with no dependencies get the lowest indexes.',
+                // 0부터 시작하는 실행 순서 — 0번은 항상 보일러플레이트, 낮은 번호부터 완료해야 다음 태스크 진행 가능
+                description: 'Execution order (0-based). 0 is always the boilerplate task. Tasks with no dependencies get the lowest indexes.',
               },
               type: {
                 type: 'string',
@@ -69,7 +73,8 @@ export class Phase2Service {
 
   constructor(
     private readonly claudeAgent: ClaudeAgentService,
-    private readonly prisma: PrismaService,
+    @InjectRepository(AnalysisDocument) private readonly analysisDocumentRepo: Repository<AnalysisDocument>,
+    @InjectRepository(Task) private readonly taskRepo: Repository<Task>,
   ) {
     this.systemPrompt = Phase2Service.loadPrompt('phase2-system.md');
   }
@@ -80,9 +85,10 @@ export class Phase2Service {
   async run(projectId: string, pipelineRunId: string): Promise<void> {
     // isConfirmed=true인 가장 최신 버전의 분석 문서 조회.
     // 사용자가 Phase 1 결과를 확정(confirm)해야 Phase 2를 실행할 수 있음
-    const doc = await this.prisma.analysisDocument.findFirst({
+    // order: { version: 'DESC' } — Prisma의 orderBy: { version: 'desc' }에 대응
+    const doc = await this.analysisDocumentRepo.findOne({
       where: { projectId, isConfirmed: true },
-      orderBy: { version: 'desc' },
+      order: { version: 'DESC' },
     });
 
     if (!doc) {
@@ -100,7 +106,7 @@ export class Phase2Service {
       `## ERD\n${doc.erd}`,
       `## API Specification\n${doc.apiSpec}`,
       `## Architecture\n${doc.architecture}`,
-      // directoryStructure는 JSON(JSONB) 타입 — 보기 좋게 포맷해서 전달
+      // directoryStructure는 JSONB 타입 — 보기 좋게 포맷해서 전달
       `## Directory Structure\n${JSON.stringify(doc.directoryStructure, null, 2)}`,
     ].join('\n');
 
@@ -117,18 +123,21 @@ export class Phase2Service {
 
     const input = toolInput as TaskListInput;
 
-    // createMany(): 태스크 목록을 한 번의 쿼리로 일괄 저장 — 개별 create()보다 효율적
-    await this.prisma.task.createMany({
-      data: input.tasks.map((t) => ({
-        projectId,
-        pipelineRunId,
-        name: t.name,
-        description: t.description,
-        // Claude가 반환한 order_index(snake_case)를 Prisma 필드명(camelCase)으로 변환
-        orderIndex: t.order_index,
-        type: t.type,
-      })),
-    });
+    // save(array): TypeORM에서 여러 엔티티를 한 번에 저장 (Prisma의 createMany에 대응)
+    // create()로 인스턴스를 만들고 save()로 한 번에 INSERT
+    await this.taskRepo.save(
+      input.tasks.map((t) =>
+        this.taskRepo.create({
+          projectId,
+          pipelineRunId,
+          name: t.name,
+          description: t.description,
+          // Claude가 반환한 order_index(snake_case)를 TypeORM 필드명(camelCase)으로 변환
+          orderIndex: t.order_index,
+          type: t.type as TaskType,
+        }),
+      ),
+    );
 
     this.logger.log(`Phase 2 complete — ${input.tasks.length} tasks created`);
   }

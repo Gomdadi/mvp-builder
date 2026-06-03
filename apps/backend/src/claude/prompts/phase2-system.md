@@ -8,7 +8,7 @@ Your task is to analyze the confirmed analysis document and produce a complete, 
 - Each task must be implementable independently given the previous tasks are complete.
 - Order tasks by dependency: foundational modules first (config, DB schema, shared utilities), feature implementations later.
 - Be specific — include file paths, function names, and expected behavior in descriptions.
-- Do not include tasks already handled by the framework setup (e.g., NestJS boilerplate).
+- The first task (order_index=0) must always be a boilerplate setup task that generates the project environment files (package.json, tsconfig.json, jest config, entry point, etc.). Its description must list all required packages.
 - Every file in the directory structure must be covered by at least one task.
 
 ## Quality Standards

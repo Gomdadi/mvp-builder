@@ -27,11 +27,72 @@ Each task must include a `type` field:
 
 Assign type based on the target file path. If the directory structure contains a frontend directory (e.g., `src/`, `pages/`, `components/`, `app/` under a frontend root), tasks targeting those paths are `FRONTEND`.
 
+## Boilerplate task (always first)
+
+The very first task must set up the project environment. Use order_index=0 and type=BACKEND.
+
+Example:
+```json
+{
+  "name": "Set up project boilerplate",
+  "description": "Generate project environment files: package.json (with all required dependencies), tsconfig.json, jest.config.js, and framework entry point files (e.g., main.ts, app.module.ts for NestJS). Required packages: @nestjs/common, @nestjs/core, @nestjs/platform-express, typeorm, pg, jest, ts-jest, @types/jest, reflect-metadata, rxjs",
+  "type": "BACKEND",
+  "order_index": 0
+}
+```
+
 ## Output requirements
 
 - Cover every file listed in the directory structure.
 - name: Max 100 characters. Action-oriented verb phrase.
 - description: Must include the target file path, what to implement, key methods or endpoints, and acceptance criteria.
-- order_index: 1-based. Tasks with no dependencies get the lowest indexes. Tasks that depend on others get higher indexes. Frontend tasks always have higher indexes than the backend tasks they depend on.
+- order_index: 0-based. The boilerplate task is always 0. Remaining tasks start from 1. Tasks with no dependencies get the lowest indexes. Tasks that depend on others get higher indexes. Frontend tasks always have higher indexes than the backend tasks they depend on.
 - type: `BACKEND` or `FRONTEND`.
 - Do not include speculative or optional tasks — only what is required to implement the MVP as defined in the analysis document.
+
+---
+
+## Example output
+
+```json
+{
+  "tasks": [
+    {
+      "name": "Set up project boilerplate",
+      "description": "Generate project environment files: docker-compose.yml (node:20-alpine, npm ci && jest), package.json (@nestjs/common, @nestjs/core, typeorm, pg, jest, ts-jest), tsconfig.json, jest.config.js, src/app.module.ts, src/main.ts. Required packages: @nestjs/common ^10, @nestjs/core ^10, @nestjs/platform-express ^10, @nestjs/typeorm ^10, typeorm ^0.3, pg ^8, reflect-metadata ^0.2, rxjs ^7",
+      "type": "BACKEND",
+      "order_index": 0
+    },
+    {
+      "name": "Define User TypeORM entity",
+      "description": "File: src/user/user.entity.ts. Define User entity with columns: id (uuid PK), email (unique), passwordHash, name, createdAt, updatedAt. Add @Index on email. No methods — data class only.",
+      "type": "BACKEND",
+      "order_index": 1
+    },
+    {
+      "name": "Implement UserService CRUD",
+      "description": "File: src/user/user.service.ts. Implement findById(id), create(dto), update(id, dto), delete(id). findById throws NotFoundException if not found. create throws ConflictException if email duplicated. Depends on User entity and Repository injection.",
+      "type": "BACKEND",
+      "order_index": 2
+    },
+    {
+      "name": "Implement UserController REST endpoints",
+      "description": "File: src/user/user.controller.ts. Implement GET /users/:id, POST /users, PATCH /users/:id, DELETE /users/:id. Use JwtAuthGuard on all routes. Delegate business logic to UserService.",
+      "type": "BACKEND",
+      "order_index": 3
+    },
+    {
+      "name": "Define CreateUserDto validation",
+      "description": "File: src/user/dto/create-user.dto.ts. Define DTO with: email (IsEmail), password (MinLength 8), name (IsString, IsNotEmpty). Use class-validator decorators.",
+      "type": "BACKEND",
+      "order_index": 3
+    },
+    {
+      "name": "Wire UserModule",
+      "description": "File: src/user/user.module.ts. Import TypeOrmModule.forFeature([User]), provide UserService, declare UserController. Export UserService for use in other modules.",
+      "type": "BACKEND",
+      "order_index": 4
+    }
+  ]
+}
+```

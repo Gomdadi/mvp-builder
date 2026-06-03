@@ -124,16 +124,16 @@
   - [x] BullMQ retry 설정 (attempts: 3, exponential backoff delay: 2000ms)
   - [x] Unit Test: 잡 등록 및 Worker 소비 흐름 (3 cases)
 
-#### T-E7-02: PipelineService 상태 머신 및 resume 전략 구현
+#### T-E7-02: PipelineService 상태 머신 및 resume 전략 구현 ✅
 - **유형**: 개발
 - **설명**: Phase 전환 로직, 상태 관리, Phase 3 resume (status=DONE skip)
 - **선행 태스크**: T-E7-01, T-E6-02, T-E6-03, T-E6-04
 - **완료 기준**:
-  - [ ] `POST /v1/pipeline/confirm` → Phase 2→3 순서 실행
-  - [ ] `POST /v1/pipeline/feedback` → Phase 1 재실행
-  - [ ] Phase 3 retry 시 `status=DONE` 태스크 skip, 미완료부터 재시작
-  - [ ] 각 태스크 완료 시 DB `status=DONE` 저장
-  - [ ] 중복 실행 시 409 PIPELINE_ALREADY_RUNNING 반환
+  - [x] `POST /v1/pipeline/confirm` → Phase 2→3 순서 실행
+  - [x] `POST /v1/pipeline/feedback` → Phase 1 재실행
+  - [x] Phase 3 retry 시 `status=DONE` 태스크 skip, 미완료부터 재시작 (TASK_QUEUE 분리 + jobId 중복 방지)
+  - [x] 각 태스크 완료 시 DB `status=DONE` 저장
+  - [x] 중복 실행 시 409 PIPELINE_ALREADY_RUNNING 반환
 
 ---
 
@@ -228,7 +228,7 @@ flowchart TD
 | 태스크 | 상태 |
 |--------|------|
 | T-E6-04 Phase 3 코드 생성 + S3 | ✅ |
-| T-E7-02 PipelineService + resume | ⬜ |
+| T-E7-02 PipelineService + resume | ✅ |
 | T-E9-01 GitHub Service | ⬜ |
 
 **완료 기준**: Phase 1→2→3 end-to-end 동작, GitHub 저장소 생성 + push 확인

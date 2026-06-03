@@ -6,6 +6,7 @@ import { PipelineService } from './pipeline.service';
 import { PIPELINE_QUEUE, PipelineJobName } from './pipeline.constants';
 import { Project } from '../entities/project.entity';
 import { PipelineRun } from '../entities/pipeline-run.entity';
+import { AnalysisDocument } from '../entities/analysis-document.entity';
 
 // jest.fn(): 실제 구현 없이 호출 여부, 인자 등을 추적할 수 있는 가짜 함수
 const mockQueue = { add: jest.fn() };
@@ -15,6 +16,8 @@ const mockQueue = { add: jest.fn() };
 const mockProjectRepo = { findOne: jest.fn() };
 // create(): 인스턴스 생성 (DB 저장 안 함) / save(): DB INSERT 후 저장된 엔티티 반환
 const mockPipelineRunRepo = { findOne: jest.fn(), create: jest.fn(), save: jest.fn() };
+// update(): 조건에 맞는 엔티티를 부분 업데이트
+const mockAnalysisDocumentRepo = { update: jest.fn() };
 
 // describe: 테스트 그룹. 관련된 테스트를 묶는 용도
 describe('PipelineService', () => {
@@ -36,6 +39,7 @@ describe('PipelineService', () => {
         // 엔티티 클래스를 키로 어떤 Repository를 주입할지 식별한다.
         { provide: getRepositoryToken(Project), useValue: mockProjectRepo },
         { provide: getRepositoryToken(PipelineRun), useValue: mockPipelineRunRepo },
+        { provide: getRepositoryToken(AnalysisDocument), useValue: mockAnalysisDocumentRepo },
       ],
     }).compile();
 
@@ -81,6 +85,65 @@ describe('PipelineService', () => {
 
       await expect(service.start('project-id')).rejects.toThrow(ConflictException);
       expect(mockQueue.add).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('confirm', () => {
+    it('isConfirmed 업데이트 후 PHASE_2 PipelineRun을 생성하고 CONFIRM 잡을 등록한다', async () => {
+      mockProjectRepo.findOne.mockResolvedValue({ id: 'project-id' });
+      mockPipelineRunRepo.findOne.mockResolvedValue(null);
+      mockAnalysisDocumentRepo.update.mockResolvedValue(undefined);
+      mockPipelineRunRepo.create.mockReturnValue({ id: 'run-id', phase: 'PHASE_2', status: 'RUNNING' });
+      mockPipelineRunRepo.save.mockResolvedValue({ id: 'run-id', phase: 'PHASE_2', status: 'RUNNING' });
+
+      const result = await service.confirm('project-id', 'doc-id');
+
+      expect(mockAnalysisDocumentRepo.update).toHaveBeenCalledWith({ id: 'doc-id' }, { isConfirmed: true });
+      expect(mockPipelineRunRepo.create).toHaveBeenCalledWith({
+        projectId: 'project-id', phase: 'PHASE_2', status: 'RUNNING',
+      });
+      expect(mockQueue.add).toHaveBeenCalledWith(
+        PipelineJobName.CONFIRM,
+        expect.objectContaining({ projectId: 'project-id', pipelineRunId: 'run-id' }),
+      );
+      expect(result).toEqual({ pipelineId: 'run-id', phase: 'PHASE_2', status: 'RUNNING' });
+    });
+
+    it('존재하지 않는 projectId면 404를 던진다', async () => {
+      mockProjectRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.confirm('not-exist', 'doc-id')).rejects.toThrow(NotFoundException);
+      expect(mockQueue.add).not.toHaveBeenCalled();
+    });
+
+    it('이미 실행 중인 파이프라인이 있으면 409를 던진다', async () => {
+      mockProjectRepo.findOne.mockResolvedValue({ id: 'project-id' });
+      mockPipelineRunRepo.findOne.mockResolvedValue({ id: 'existing-run' });
+
+      await expect(service.confirm('project-id', 'doc-id')).rejects.toThrow(ConflictException);
+      expect(mockQueue.add).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('feedback', () => {
+    it('userFeedback 업데이트 후 PHASE_1 PipelineRun을 생성하고 FEEDBACK 잡을 등록한다', async () => {
+      mockProjectRepo.findOne.mockResolvedValue({ id: 'project-id' });
+      mockPipelineRunRepo.findOne.mockResolvedValue(null);
+      mockAnalysisDocumentRepo.update.mockResolvedValue(undefined);
+      mockPipelineRunRepo.create.mockReturnValue({ id: 'run-id', phase: 'PHASE_1', status: 'RUNNING' });
+      mockPipelineRunRepo.save.mockResolvedValue({ id: 'run-id', phase: 'PHASE_1', status: 'RUNNING' });
+
+      const result = await service.feedback('project-id', 'doc-id', '이 부분 수정해주세요');
+
+      expect(mockAnalysisDocumentRepo.update).toHaveBeenCalledWith(
+        { id: 'doc-id' },
+        { userFeedback: '이 부분 수정해주세요' },
+      );
+      expect(mockQueue.add).toHaveBeenCalledWith(
+        PipelineJobName.FEEDBACK,
+        expect.objectContaining({ projectId: 'project-id', feedbackText: '이 부분 수정해주세요' }),
+      );
+      expect(result).toEqual({ pipelineId: 'run-id', phase: 'PHASE_1', status: 'RUNNING' });
     });
   });
 });

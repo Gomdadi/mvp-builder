@@ -1,4 +1,4 @@
-import { Controller, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
 import { PipelineService } from './pipeline.service';
 
 // @Controller('pipeline'): 이 클래스의 모든 라우트는 /v1/pipeline으로 시작 (global prefix v1 포함)
@@ -15,5 +15,25 @@ export class PipelineController {
   // @Param('projectId'): URL의 :projectId 값을 projectId 변수로 추출
   start(@Param('projectId') projectId: string) {
     return this.pipelineService.start(projectId);
+  }
+
+  // 분석 문서 확정 → Phase 2/3 실행
+  @Post(':projectId/confirm')
+  @HttpCode(HttpStatus.ACCEPTED)
+  confirm(
+    @Param('projectId') projectId: string,
+    @Body() body: { analysisDocumentId: string },
+  ) {
+    return this.pipelineService.confirm(projectId, body.analysisDocumentId);
+  }
+
+  // 피드백 제출 → Phase 1 재실행
+  @Post(':projectId/feedback')
+  @HttpCode(HttpStatus.ACCEPTED)
+  feedback(
+    @Param('projectId') projectId: string,
+    @Body() body: { analysisDocumentId: string; feedbackText: string },
+  ) {
+    return this.pipelineService.feedback(projectId, body.analysisDocumentId, body.feedbackText);
   }
 }

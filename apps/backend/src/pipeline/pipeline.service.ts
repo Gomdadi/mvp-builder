@@ -5,6 +5,7 @@ import { Queue } from 'bullmq';
 import { Repository } from 'typeorm';
 import { Project } from '../entities/project.entity';
 import { PipelineRun } from '../entities/pipeline-run.entity';
+import { AnalysisDocument } from '../entities/analysis-document.entity';
 import { PipelinePhase, PipelineStatus } from '../entities/enums';
 import { PIPELINE_QUEUE, PipelineJobName } from './pipeline.constants';
 
@@ -17,6 +18,7 @@ export class PipelineService {
     // Repository<T>: TypeORM의 기본 저장소 클래스. findOne, save, update 등 CRUD 메서드 제공
     @InjectRepository(Project) private readonly projectRepo: Repository<Project>,
     @InjectRepository(PipelineRun) private readonly pipelineRunRepo: Repository<PipelineRun>,
+    @InjectRepository(AnalysisDocument) private readonly analysisDocumentRepo: Repository<AnalysisDocument>,
   ) {}
 
   async start(projectId: string) {
@@ -51,6 +53,75 @@ export class PipelineService {
       projectId,
       pipelineRunId: pipelineRun.id,
       phase: PipelinePhase.PHASE_1,
+    });
+
+    return { pipelineId: pipelineRun.id, phase: pipelineRun.phase, status: pipelineRun.status };
+  }
+
+  // 분석 문서 확정 → Phase 2/3 실행 잡 등록.
+  // analysisDocumentId: 사용자가 확정할 분석 문서 (여러 버전 중 하나를 선택 가능)
+  async confirm(projectId: string, analysisDocumentId: string) {
+    const project = await this.projectRepo.findOne({ where: { id: projectId } });
+    if (!project) {
+      throw new NotFoundException('NOT_FOUND');
+    }
+
+    const running = await this.pipelineRunRepo.findOne({
+      where: { projectId, status: PipelineStatus.RUNNING },
+    });
+    if (running) {
+      throw new ConflictException('PIPELINE_ALREADY_RUNNING');
+    }
+
+    // isConfirmed=true로 변경 — Phase 2/3에서 이 문서를 기준으로 코드를 생성
+    await this.analysisDocumentRepo.update({ id: analysisDocumentId }, { isConfirmed: true });
+
+    const pipelineRun = await this.pipelineRunRepo.save(
+      this.pipelineRunRepo.create({
+        projectId,
+        phase: PipelinePhase.PHASE_2,
+        status: PipelineStatus.RUNNING,
+      }),
+    );
+
+    await this.pipelineQueue.add(PipelineJobName.CONFIRM, {
+      projectId,
+      pipelineRunId: pipelineRun.id,
+    });
+
+    return { pipelineId: pipelineRun.id, phase: pipelineRun.phase, status: pipelineRun.status };
+  }
+
+  // 피드백 제출 → Phase 1 재실행 잡 등록.
+  // feedbackText: 이전 분석 문서에 대한 수정 요청 — Phase1Service.run()에 전달됨
+  async feedback(projectId: string, analysisDocumentId: string, feedbackText: string) {
+    const project = await this.projectRepo.findOne({ where: { id: projectId } });
+    if (!project) {
+      throw new NotFoundException('NOT_FOUND');
+    }
+
+    const running = await this.pipelineRunRepo.findOne({
+      where: { projectId, status: PipelineStatus.RUNNING },
+    });
+    if (running) {
+      throw new ConflictException('PIPELINE_ALREADY_RUNNING');
+    }
+
+    // userFeedback 저장 — Phase 1 재실행 시 이 피드백을 시스템 메시지에 포함
+    await this.analysisDocumentRepo.update({ id: analysisDocumentId }, { userFeedback: feedbackText });
+
+    const pipelineRun = await this.pipelineRunRepo.save(
+      this.pipelineRunRepo.create({
+        projectId,
+        phase: PipelinePhase.PHASE_1,
+        status: PipelineStatus.RUNNING,
+      }),
+    );
+
+    await this.pipelineQueue.add(PipelineJobName.FEEDBACK, {
+      projectId,
+      pipelineRunId: pipelineRun.id,
+      feedbackText,
     });
 
     return { pipelineId: pipelineRun.id, phase: pipelineRun.phase, status: pipelineRun.status };

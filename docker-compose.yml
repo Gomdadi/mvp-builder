@@ -8,6 +8,8 @@ services:
     volumes:
       - ./apps/backend:/app
       - /app/node_modules
+      # dockerode가 호스트 Docker 데몬에 접근하기 위해 소켓 마운트
+      - /var/run/docker.sock:/var/run/docker.sock
     env_file:
       - ./apps/backend/.env
     environment:

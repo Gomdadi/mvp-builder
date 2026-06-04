@@ -6,6 +6,10 @@ Your task is to analyze the confirmed analysis document and produce a complete, 
 
 - Call generate_tasks exactly once with the complete task list.
 - Each task must be implementable independently given the previous tasks are complete.
+- Group related files into one task. Do not create one task per file.
+- Files that are tightly coupled (share the same data model, call each other directly, or always change together) must be in the same task.
+- Target total: 8–12 tasks (excluding boilerplate). Prefer fewer, larger tasks.
+- Each task description must list ALL file paths it will generate.
 - Order tasks by dependency: foundational modules first (config, DB schema, shared utilities), feature implementations later.
 - Be specific — include file paths, function names, and expected behavior in descriptions.
 - The first task (order_index=0) must always be a boilerplate setup task that generates the project environment files (package.json, tsconfig.json, jest config, entry point, etc.). Its description must list all required packages. This task has type=BACKEND.

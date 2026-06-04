@@ -47,25 +47,35 @@ export class Phase4Service {
     },
   };
 
-  // generate_implementation_code 툴: *.spec.ts가 아닌 파일을 재작성.
-  // Phase3의 TOOL_IMPL과 동일 스키마 — Claude가 익숙한 인터페이스 재사용
+  // generate_implementation_code 툴: 여러 파일을 한 번에 재작성.
+  // 구현 파일과 테스트 파일 모두 수정 가능. 관련 파일을 한 번에 일관성 있게 수정하도록 배열로 받음.
   private static readonly TOOL_IMPL: Anthropic.Tool = {
     name: 'generate_implementation_code',
     description:
-      'Generate or rewrite an implementation file to fix failing tests. Do NOT use for *.spec.ts files.',
+      'Generate or rewrite one or more files (implementation or test) to fix failing tests. Pass all files that need to be changed together in a single call.',
     input_schema: {
       type: 'object' as const,
       properties: {
-        file_path: {
-          type: 'string',
-          description: 'Relative path of the implementation file to fix',
-        },
-        code: {
-          type: 'string',
-          description: 'Complete, corrected file content',
+        files: {
+          type: 'array',
+          description: 'List of files to create or rewrite',
+          items: {
+            type: 'object',
+            properties: {
+              file_path: {
+                type: 'string',
+                description: 'Relative path of the file to fix',
+              },
+              code: {
+                type: 'string',
+                description: 'Complete, corrected file content',
+              },
+            },
+            required: ['file_path', 'code'],
+          },
         },
       },
-      required: ['file_path', 'code'],
+      required: ['files'],
     },
   };
 
@@ -135,6 +145,8 @@ export class Phase4Service {
       this.logger.warn(
         `Phase 4 sandbox failed (attempt ${attempt + 1}/${SANDBOX_MAX_RETRIES}) — projectId=${projectId}`,
       );
+      // 에러 내용을 로그에 출력 — 디버깅용
+      this.logger.warn(`Sandbox error output:\n${result.output}`);
 
       if (attempt === SANDBOX_MAX_RETRIES - 1) break;
 
@@ -167,18 +179,16 @@ export class Phase4Service {
       '## Project Directory Structure',
       JSON.stringify(directoryStructure, null, 2),
       '',
-      'Use read_files to inspect relevant files, then fix them with generate_implementation_code.',
-      'Do NOT modify *.spec.ts test files.',
+      'Use read_files to inspect relevant files (max 3 calls), then fix them with generate_implementation_code.',
     ].join('\n');
 
     await this.claudeAgent.runAgentLoop({
       system: this.debugSystemPrompt,
       messages: [{ role: 'user', content: userContent }],
-      // TOOL_READ_FILES: 파일 내용 조회. TOOL_IMPL: 파일 수정.
-      // TOOL_TEST를 제공하지 않음 — test 파일 생성을 원천 차단
+      // TOOL_READ_FILES: 파일 내용 조회. TOOL_IMPL: 구현/테스트 파일 수정.
       tools: [Phase4Service.TOOL_READ_FILES, Phase4Service.TOOL_IMPL],
-      // read_files 3~4회 + generate_implementation_code 2~3회면 충분
-      maxIterations: 8,
+      maxIterations: 20,
+      model: 'claude-haiku-4-5-20251001',
       apiKey: claudeApiKey,
       onToolCall: (toolName, toolInput) => {
         if (toolName === 'read_files') {
@@ -193,14 +203,12 @@ export class Phase4Service {
         }
 
         if (toolName === 'generate_implementation_code') {
-          const { file_path, code } = toolInput as { file_path: string; code: string };
-          // *.spec.ts 테스트 파일 수정 거부 — 테스트(명세)는 불변
-          if (file_path.endsWith('.spec.ts')) {
-            return 'Rejected: test files (*.spec.ts) cannot be modified. Fix the implementation instead.';
+          const { files } = toolInput as { files: { file_path: string; code: string }[] };
+          // 배열로 받은 파일들을 FileMap에 일괄 업데이트 — 다음 sandbox 실행에서 수정본 반영
+          for (const { file_path, code } of files) {
+            fileMap.set(file_path, code);
           }
-          // FileMap in-place 업데이트 — 다음 sandbox 실행에서 수정본 반영
-          fileMap.set(file_path, code);
-          return `File ${file_path} updated.`;
+          return `${files.length} file(s) updated: ${files.map((f) => f.file_path).join(', ')}`;
         }
 
         this.logger.warn(`Unexpected tool in Phase 4 debug loop: ${toolName}`);

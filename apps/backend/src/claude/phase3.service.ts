@@ -6,6 +6,7 @@ import { Repository } from 'typeorm';
 import Anthropic from '@anthropic-ai/sdk';
 import { ClaudeAgentService } from './claude-agent.service';
 import { S3Service } from '../s3/s3.service';
+import { DockerSandboxService, SandboxResult } from '../docker/docker-sandbox.service';
 import { AnalysisDocument } from '../entities/analysis-document.entity';
 import { Task } from '../entities/task.entity';
 import { TaskStatus, TaskType } from '../entities/enums';
@@ -24,6 +25,8 @@ export class Phase3Service {
   // 보일러플레이트 프롬프트는 백엔드(_env/ 테스트 환경)와 프론트엔드(실제 프로젝트 기반 파일)로 분리
   private readonly backendBoilerplateSystemPrompt: string;
   private readonly frontendBoilerplateSystemPrompt: string;
+  // per-task debug loop 프롬프트 — Phase 4의 phase4-system.md 재사용
+  private readonly debugSystemPrompt: string;
 
   // ── Backend 툴 (TDD) ──────────────────────────────────────────────────────
 
@@ -115,6 +118,49 @@ export class Phase3Service {
     Phase3Service.TOOL_FRONTEND_IMPL,
   ];
 
+  // ── per-task debug loop 툴 (Phase 4의 툴과 동일한 스키마) ─────────────────
+
+  // read_files: Claude가 fileMap에서 파일 내용을 요청
+  private static readonly TOOL_DEBUG_READ: Anthropic.Tool = {
+    name: 'read_files',
+    description: 'Read the contents of one or more files from the current workspace to understand their code.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        file_paths: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'List of file paths to read',
+        },
+      },
+      required: ['file_paths'],
+    },
+  };
+
+  // generate_implementation_code: 여러 파일을 한 번에 재작성
+  private static readonly TOOL_DEBUG_IMPL: Anthropic.Tool = {
+    name: 'generate_implementation_code',
+    description: 'Generate or rewrite one or more files to fix failing tests. Pass all files that need changes in one call.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        files: {
+          type: 'array',
+          description: 'List of files to create or rewrite',
+          items: {
+            type: 'object',
+            properties: {
+              file_path: { type: 'string', description: 'Relative path of the file to fix' },
+              code: { type: 'string', description: 'Complete, corrected file content' },
+            },
+            required: ['file_path', 'code'],
+          },
+        },
+      },
+      required: ['files'],
+    },
+  };
+
   private static loadPrompt(filename: string): string {
     return fs.readFileSync(path.join(__dirname, 'prompts', filename), 'utf-8');
   }
@@ -124,11 +170,13 @@ export class Phase3Service {
     @InjectRepository(Task) private readonly taskRepo: Repository<Task>,
     @InjectRepository(AnalysisDocument) private readonly analysisDocumentRepo: Repository<AnalysisDocument>,
     private readonly s3: S3Service,
+    private readonly dockerSandbox: DockerSandboxService,
   ) {
     this.backendSystemPrompt = Phase3Service.loadPrompt('phase3-backend-system.md');
     this.frontendSystemPrompt = Phase3Service.loadPrompt('phase3-frontend-system.md');
     this.backendBoilerplateSystemPrompt = Phase3Service.loadPrompt('phase3-boilerplate-backend-system.md');
     this.frontendBoilerplateSystemPrompt = Phase3Service.loadPrompt('phase3-boilerplate-frontend-system.md');
+    this.debugSystemPrompt = Phase3Service.loadPrompt('phase4-system.md');
   }
 
   async run(projectId: string, taskId: string, claudeApiKey?: string): Promise<void> {
@@ -189,6 +237,7 @@ export class Phase3Service {
       messages: [{ role: 'user', content: userContent }],
       // TOOL_BACKEND_IMPL만 허용 — _env/ 하위 환경 파일만 생성
       tools: [Phase3Service.TOOL_BACKEND_IMPL],
+      model: 'claude-sonnet-4-6',
       apiKey: claudeApiKey,
       onToolCall: (toolName, toolInput) => {
         if (toolName === 'generate_backend_implementation_code') {
@@ -237,6 +286,7 @@ export class Phase3Service {
       messages: [{ role: 'user', content: userContent }],
       // TOOL_FRONTEND_IMPL만 허용 — 프론트엔드 기반 파일만 생성
       tools: [Phase3Service.TOOL_FRONTEND_IMPL],
+      model: 'claude-sonnet-4-6',
       apiKey: claudeApiKey,
       onToolCall: (toolName, toolInput) => {
         if (toolName === 'generate_frontend_implementation_code') {
@@ -266,54 +316,51 @@ export class Phase3Service {
   ): Promise<void> {
     this.logger.log(`Phase 3 backend start — taskId=${taskId} name="${task.name}"`);
 
-    // 이전 task들이 생성한 구현 파일을 컨텍스트로 주입 — 실제 시그니처 기반 작성 유도
-    const priorCode = await this.loadPriorImplementations(projectId, doc.directoryStructure);
-
     const userContent = [
       '## Task',
       `Name: ${task.name}`,
       `Description: ${task.description}`,
       '',
-      priorCode ? `## Existing Implementations\n\n${priorCode}` : null,
-      '',
       '## Project Directory Structure',
       JSON.stringify(doc.directoryStructure, null, 2),
-    ]
-      .filter((line) => line !== null)
-      .join('\n');
+    ].join('\n');
 
-    // test/impl 파일을 추적 — 두 파일 모두 생성되었는지 검증하기 위함
-    let testFile: GeneratedFile | null = null;
-    let implFile: GeneratedFile | null = null;
+    // test/impl 파일을 배열로 수집 — 한 태스크가 여러 파일(여러 test+impl)을 담당할 수 있으므로
+    // 단일 파일이 아닌 배열로 모은다. 최소 각 1개 이상 생성되었는지로 완료를 검증한다.
+    const testFiles: GeneratedFile[] = [];
+    const implFiles: GeneratedFile[] = [];
 
     await this.claudeAgent.runAgentLoop({
       system: this.backendSystemPrompt,
       messages: [{ role: 'user', content: userContent }],
       tools: Phase3Service.BACKEND_TOOLS,
+      model: 'claude-sonnet-4-6',
       apiKey: claudeApiKey,
       onToolCall: (toolName, toolInput) => {
         if (toolName === 'generate_backend_test_code') {
           const input = toolInput as { test_path: string; test_code: string };
-          testFile = { filePath: input.test_path, code: input.test_code };
-          return 'Test code accepted. Now generate the implementation that makes these tests pass.';
+          testFiles.push({ filePath: input.test_path, code: input.test_code });
+          return 'Test file accepted. Continue generating remaining test or implementation files.';
         }
         if (toolName === 'generate_backend_implementation_code') {
           const input = toolInput as { file_path: string; code: string };
-          implFile = { filePath: input.file_path, code: input.code };
-          return 'Implementation code accepted.';
+          implFiles.push({ filePath: input.file_path, code: input.code });
+          return 'Implementation file accepted. Continue generating remaining files.';
         }
         this.logger.warn(`Unknown tool called: ${toolName}`);
         return 'Unknown tool.';
       },
     });
 
-    if (!testFile || !implFile) {
-      throw new Error(`Phase 3 backend incomplete — only ${[testFile, implFile].filter(Boolean).length}/2 files generated for task ${taskId}`);
+    if (testFiles.length === 0 || implFiles.length === 0) {
+      throw new Error(`Phase 3 backend incomplete — testFiles=${testFiles.length}, implFiles=${implFiles.length} for task ${taskId}`);
     }
 
-    // sandbox 없이 바로 S3 업로드 — 종합 검증은 Phase 4가 담당
-    await this.uploadAndComplete(projectId, taskId, [testFile, implFile]);
-    this.logger.log(`Phase 3 backend complete — taskId=${taskId}`);
+    const generated = [...testFiles, ...implFiles];
+    // per-task sandbox: 이전 태스크 파일들을 누적해서 현재 태스크 파일과 함께 테스트
+    await this.runSandboxAndDebug(projectId, taskId, generated, claudeApiKey);
+    await this.uploadAndComplete(projectId, taskId, generated);
+    this.logger.log(`Phase 3 backend complete — taskId=${taskId} files=${generated.length}`);
   }
 
   // 프론트엔드 컴포넌트 태스크를 TDD 방식으로 실행.
@@ -328,15 +375,10 @@ export class Phase3Service {
   ): Promise<void> {
     this.logger.log(`Phase 3 frontend start — taskId=${taskId} name="${task.name}"`);
 
-    // 이전 task들이 생성한 구현 파일을 컨텍스트로 주입 — 실제 시그니처 기반 작성 유도
-    const priorCode = await this.loadPriorImplementations(projectId, doc.directoryStructure);
-
     const userContent = [
       '## Task',
       `Name: ${task.name}`,
       `Description: ${task.description}`,
-      '',
-      priorCode ? `## Existing Implementations\n\n${priorCode}` : null,
       '',
       doc.designSystem ? `## Design System\n${doc.designSystem}` : null,
       '',
@@ -346,65 +388,42 @@ export class Phase3Service {
       .filter((line) => line !== null)
       .join('\n');
 
-    // test/component 파일을 추적 — 두 파일 모두 생성되었는지 검증하기 위함
-    let testFile: GeneratedFile | null = null;
-    let componentFile: GeneratedFile | null = null;
+    // test/component 파일을 배열로 수집 — 한 태스크가 여러 파일(페이지+서브 컴포넌트 등)을 담당할 수 있으므로
+    // 단일 파일이 아닌 배열로 모은다. 최소 각 1개 이상 생성되었는지로 완료를 검증한다.
+    const testFiles: GeneratedFile[] = [];
+    const componentFiles: GeneratedFile[] = [];
 
     await this.claudeAgent.runAgentLoop({
       system: this.frontendSystemPrompt,
       messages: [{ role: 'user', content: userContent }],
       tools: Phase3Service.FRONTEND_TOOLS,
+      model: 'claude-sonnet-4-6',
       apiKey: claudeApiKey,
       onToolCall: (toolName, toolInput) => {
         if (toolName === 'generate_frontend_test_code') {
           const input = toolInput as { test_path: string; test_code: string };
-          testFile = { filePath: input.test_path, code: input.test_code };
-          return 'Test code accepted. Now generate the component that makes these tests pass.';
+          testFiles.push({ filePath: input.test_path, code: input.test_code });
+          return 'Test file accepted. Continue generating remaining test or component files.';
         }
         if (toolName === 'generate_frontend_implementation_code') {
           const input = toolInput as { file_path: string; code: string };
-          componentFile = { filePath: input.file_path, code: input.code };
-          return 'Component code accepted.';
+          componentFiles.push({ filePath: input.file_path, code: input.code });
+          return 'Component file accepted. Continue generating remaining files.';
         }
         this.logger.warn(`Unknown tool called: ${toolName}`);
         return 'Unknown tool.';
       },
     });
 
-    if (!testFile || !componentFile) {
-      throw new Error(`Phase 3 frontend incomplete — only ${[testFile, componentFile].filter(Boolean).length}/2 files generated for task ${taskId}`);
+    if (testFiles.length === 0 || componentFiles.length === 0) {
+      throw new Error(`Phase 3 frontend incomplete — testFiles=${testFiles.length}, componentFiles=${componentFiles.length} for task ${taskId}`);
     }
 
-    // sandbox 없이 바로 S3 업로드 — 종합 검증은 Phase 4가 담당
-    await this.uploadAndComplete(projectId, taskId, [testFile, componentFile]);
-    this.logger.log(`Phase 3 frontend complete — taskId=${taskId}`);
-  }
-
-  // S3에 이미 업로드된 이전 task들의 구현 파일을 읽어 컨텍스트 문자열로 반환.
-  // PipelineWorker가 orderIndex ASC로 task를 순차 처리하므로, 현재 시점에 S3에 있는 파일은
-  // 이전 task들이 생성한 파일이다. directoryStructure에 있는 파일만 포함해 테스트/환경 파일을
-  // 스택 무관하게 자동 제외한다 — directoryStructure는 구현 파일만 나열하도록 Phase 1에서 보장.
-  private async loadPriorImplementations(
-    projectId: string,
-    directoryStructure: Record<string, unknown>[],
-  ): Promise<string> {
-    const allFiles = await this.s3.listGeneratedFiles(projectId);
-
-    // directoryStructure에 있는 경로만 허용 — 테스트 파일·_env/ 환경 파일은 여기에 없으므로 자동 제외
-    const knownPaths = new Set(directoryStructure.map((e) => e.path as string));
-    const implFiles = allFiles.filter((f) => knownPaths.has(f));
-
-    if (implFiles.length === 0) return '';
-
-    // 병렬 다운로드 — 각 파일을 "// 경로\n코드" 형태로 표현
-    const entries = await Promise.all(
-      implFiles.map(async (filePath) => {
-        const code = await this.s3.downloadGeneratedFile(projectId, filePath);
-        return `// ${filePath}\n${code}`;
-      }),
-    );
-
-    return entries.join('\n\n---\n\n');
+    const generated = [...testFiles, ...componentFiles];
+    // per-task sandbox: 이전 태스크 파일들을 누적해서 현재 태스크 파일과 함께 테스트
+    await this.runSandboxAndDebug(projectId, taskId, generated, claudeApiKey);
+    await this.uploadAndComplete(projectId, taskId, generated);
+    this.logger.log(`Phase 3 frontend complete — taskId=${taskId} files=${generated.length}`);
   }
 
   private async uploadAndComplete(
@@ -417,5 +436,121 @@ export class Phase3Service {
     );
 
     await this.taskRepo.update({ id: taskId }, { status: TaskStatus.DONE });
+  }
+
+  // sandbox 실행 → forward dependency 감지 → debug loop 통합 헬퍼.
+  // 실패해도 throw하지 않음 — Phase 4가 최종 검증을 담당한다.
+  private async runSandboxAndDebug(
+    projectId: string,
+    taskId: string,
+    generated: GeneratedFile[],
+    claudeApiKey?: string,
+  ): Promise<void> {
+    const result = await this.runPerTaskSandbox(projectId, generated);
+
+    if (result.passed) {
+      this.logger.log(`Phase 3 per-task sandbox passed — taskId=${taskId}`);
+      return;
+    }
+
+    this.logger.warn(`Phase 3 per-task sandbox failed — taskId=${taskId}`);
+    this.logger.warn(`Sandbox output:\n${result.output}`);
+
+    const existingPaths = await this.s3.listGeneratedFiles(projectId);
+    if (this.isForwardDependencyError(result.output, existingPaths)) {
+      // 아직 생성되지 않은 파일을 import하는 경우 — Phase 4 전체 통합 후 재검증
+      this.logger.warn(`Phase 3 sandbox skipped (forward dependency) — taskId=${taskId}`);
+      return;
+    }
+
+    // 수정 가능한 에러 — debug loop 시도 (소진해도 throw하지 않음)
+    await this.runTaskDebugLoop(generated, result.output, claudeApiKey);
+  }
+
+  // S3에서 이전 태스크 파일들을 다운로드해서 현재 태스크 파일과 합쳐 sandbox 실행.
+  // _env/ 파일(docker-compose.yml 등)은 envFiles로 분리 — DockerSandboxService 규칙
+  private async runPerTaskSandbox(projectId: string, currentFiles: GeneratedFile[]): Promise<SandboxResult> {
+    const allPaths = await this.s3.listGeneratedFiles(projectId);
+    const prevFiles = await Promise.all(
+      allPaths.map(async (fp) => ({
+        filePath: fp,
+        code: await this.s3.downloadGeneratedFile(projectId, fp),
+      })),
+    );
+
+    const envFiles = prevFiles.filter((f) => f.filePath.startsWith('_env/'));
+    const codeFiles = [
+      ...prevFiles.filter((f) => !f.filePath.startsWith('_env/')),
+      ...currentFiles.filter((f) => !f.filePath.startsWith('_env/')),
+    ];
+
+    return this.dockerSandbox.runTest(envFiles, codeFiles);
+  }
+
+  // sandbox 에러 출력이 forward dependency(아직 없는 파일 import) 때문인지 판별.
+  // 상대 경로 import 오류이고, 해당 경로가 현재까지 생성된 파일 목록에 없으면 true
+  private isForwardDependencyError(output: string, existingPaths: string[]): boolean {
+    const match = output.match(/Cannot find module '(\.\.?\/[^']+)'/);
+    if (!match) return false;
+    const missing = match[1].replace(/^\.\.?\//g, '').replace(/\.ts$/, '');
+    return !existingPaths.some((p) => p.replace(/\.ts$/, '').includes(missing));
+  }
+
+  // per-task debug loop — Phase 4의 runDebugLoop와 동일한 구조, 더 작은 컨텍스트.
+  // fileMap은 현재 태스크 파일들만 포함 (이전 파일은 수정 대상 아님).
+  // debug 완료 후 generated 배열을 fileMap 변경분으로 동기화한다.
+  private async runTaskDebugLoop(
+    generated: GeneratedFile[],
+    errorOutput: string,
+    claudeApiKey?: string,
+  ): Promise<void> {
+    const fileMap = new Map(generated.map((f) => [f.filePath, f.code]));
+
+    const userContent = [
+      '## Test Failure Output',
+      errorOutput,
+      '',
+      '## Current Workspace Files',
+      Array.from(fileMap.keys()).join('\n'),
+      '',
+      'Use read_files to inspect relevant files (max 3 calls), then fix them with generate_implementation_code.',
+    ].join('\n');
+
+    await this.claudeAgent.runAgentLoop({
+      system: this.debugSystemPrompt,
+      messages: [{ role: 'user', content: userContent }],
+      tools: [Phase3Service.TOOL_DEBUG_READ, Phase3Service.TOOL_DEBUG_IMPL],
+      maxIterations: 5,
+      model: 'claude-sonnet-4-6',
+      apiKey: claudeApiKey,
+      onToolCall: (toolName, toolInput) => {
+        if (toolName === 'read_files') {
+          const { file_paths } = toolInput as { file_paths: string[] };
+          return file_paths
+            .map((fp) => {
+              const code = fileMap.get(fp);
+              return code ? `// ${fp}\n${code}` : `// File not found: ${fp}`;
+            })
+            .join('\n\n---\n\n');
+        }
+
+        if (toolName === 'generate_implementation_code') {
+          const { files } = toolInput as { files: { file_path: string; code: string }[] };
+          for (const { file_path, code } of files) {
+            fileMap.set(file_path, code);
+          }
+          return `${files.length} file(s) updated: ${files.map((f) => f.file_path).join(', ')}`;
+        }
+
+        this.logger.warn(`Unexpected tool in Phase 3 debug loop: ${toolName}`);
+        return 'Unknown tool.';
+      },
+    });
+
+    // fileMap 변경분을 generated 배열에 반영 (참조 in-place 업데이트)
+    for (const file of generated) {
+      const updated = fileMap.get(file.filePath);
+      if (updated !== undefined) file.code = updated;
+    }
   }
 }

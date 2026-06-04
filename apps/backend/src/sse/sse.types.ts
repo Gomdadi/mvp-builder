@@ -20,6 +20,8 @@ export interface SseEvent {
   phase?: string; // PipelinePhase enum 값 (phase_started/phase_completed 시)
   taskId?: string; // 처리 중인 Task id (task_started/task_completed 시)
   taskName?: string; // Task 이름 (task_started/task_completed 시)
+  analysisDocumentId?: string; // 생성된 분석 문서 id (phase_completed PHASE_1 시) — 클라이언트가 문서 조회에 사용
+  pipelineRunId?: string; // PipelineRun id (phase_completed PHASE_2 시) — 클라이언트가 태스크 목록 조회에 사용
   githubRepoUrl?: string; // 생성 코드가 push된 GitHub repo URL (pipeline_completed 시)
   message?: string; // 에러 메시지 (pipeline_failed 시)
   timestamp: string; // 이벤트 발생 시각 (ISO 8601)

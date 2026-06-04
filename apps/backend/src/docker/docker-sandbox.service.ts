@@ -56,15 +56,24 @@ export class DockerSandboxService {
         throw new Error('docker-compose up produced no containers');
       }
 
-      // 로그 수집과 종료 대기를 병렬로 실행 — logs(follow:true)는 컨테이너 종료까지 스트림 유지
-      const [output, waitResult] = await Promise.all([
-        this.collectLogs(containers[0]),
-        containers[0].wait(),
-      ]);
+      // 모든 컨테이너의 로그 수집과 종료 대기를 병렬로 실행 — 하나라도 exit code != 0이면 실패
+      const results = await Promise.all(
+        containers.map(async (container) => {
+          const [output, waitResult] = await Promise.all([
+            this.collectLogs(container),
+            container.wait(),
+          ]);
+          const exitCode = (waitResult as { StatusCode: number }).StatusCode;
+          return { exitCode, output };
+        }),
+      );
 
-      const exitCode = (waitResult as { StatusCode: number }).StatusCode;
-      this.logger.log(`Sandbox exit code=${exitCode} project=${projectName}`);
-      return { passed: exitCode === 0, output };
+      const allPassed = results.every((r) => r.exitCode === 0);
+      const output = results.map((r) => r.output).join('\n');
+      this.logger.log(
+        `Sandbox exit codes=${results.map((r) => r.exitCode).join(',')} project=${projectName}`,
+      );
+      return { passed: allPassed, output };
     } finally {
       // 성공/실패/예외 관계없이 컨테이너·네트워크 정리 후 임시 디렉토리 삭제
       if (compose) {

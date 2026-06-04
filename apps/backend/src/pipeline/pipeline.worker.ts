@@ -76,22 +76,20 @@ export class PipelineWorker extends WorkerHost {
       const session = await this.sessionService.getSession(sessionId ?? '');
       // Phase 1 시작을 SSE로 알림
       await this.sseService.publish(projectId, this.event('phase_started', { phase: PipelinePhase.PHASE_1 }));
-      await this.phase1Service.run(projectId, undefined, session?.claudeApiKey);
+      // phase1Service.run()은 생성한 AnalysisDocument id를 반환 — 클라이언트가 문서 조회에 사용하도록 이벤트에 포함
+      const analysisDocumentId = await this.phase1Service.run(projectId, undefined, session?.claudeApiKey);
       await this.pipelineRunRepo.update(
         { id: pipelineRunId },
         { status: PipelineStatus.COMPLETED, completedAt: new Date() },
       );
       // Phase 1 완료 통지 — 스트림은 유지 (confirm 후 Phase 2~4까지 동일 스트림으로 이어짐)
-      await this.sseService.publish(projectId, this.event('phase_completed', { phase: PipelinePhase.PHASE_1 }));
+      await this.sseService.publish(
+        projectId,
+        this.event('phase_completed', { phase: PipelinePhase.PHASE_1, analysisDocumentId }),
+      );
       this.logger.log(`Phase 1 complete — pipelineRunId=${pipelineRunId}`);
     } catch (e) {
-      await this.pipelineRunRepo.update(
-        { id: pipelineRunId },
-        { status: PipelineStatus.FAILED, errorMessage: (e as Error).message },
-      );
-      // 실패를 SSE로 알리고 스트림 종료
-      await this.sseService.publish(projectId, this.event('pipeline_failed', { message: (e as Error).message }));
-      await this.sseService.complete(projectId);
+      await this.failPipeline(e, pipelineRunId, projectId);
       throw e; // BullMQ retry 트리거
     }
   }
@@ -108,21 +106,20 @@ export class PipelineWorker extends WorkerHost {
       const session = await this.sessionService.getSession(sessionId ?? '');
       // Phase 1 (피드백) 재시작을 SSE로 알림
       await this.sseService.publish(projectId, this.event('phase_started', { phase: PipelinePhase.PHASE_1 }));
-      await this.phase1Service.run(projectId, feedbackText, session?.claudeApiKey);
+      // 피드백 반영 후 새로 생성된 AnalysisDocument id를 캡처해 이벤트에 포함
+      const analysisDocumentId = await this.phase1Service.run(projectId, feedbackText, session?.claudeApiKey);
       await this.pipelineRunRepo.update(
         { id: pipelineRunId },
         { status: PipelineStatus.COMPLETED, completedAt: new Date() },
       );
       // Phase 1 완료 통지 — 스트림은 유지
-      await this.sseService.publish(projectId, this.event('phase_completed', { phase: PipelinePhase.PHASE_1 }));
+      await this.sseService.publish(
+        projectId,
+        this.event('phase_completed', { phase: PipelinePhase.PHASE_1, analysisDocumentId }),
+      );
       this.logger.log(`Phase 1 (feedback) complete — pipelineRunId=${pipelineRunId}`);
     } catch (e) {
-      await this.pipelineRunRepo.update(
-        { id: pipelineRunId },
-        { status: PipelineStatus.FAILED, errorMessage: (e as Error).message },
-      );
-      await this.sseService.publish(projectId, this.event('pipeline_failed', { message: (e as Error).message }));
-      await this.sseService.complete(projectId);
+      await this.failPipeline(e, pipelineRunId, projectId);
       throw e;
     }
   }
@@ -152,7 +149,11 @@ export class PipelineWorker extends WorkerHost {
       // BullMQ 재시도 시 이미 DONE인 Task는 큐에 넣지 않음 (resume 전략)
       await this.pipelineRunRepo.update({ id: pipelineRunId }, { phase: PipelinePhase.PHASE_3 });
       // Phase 2 완료 → Phase 3 시작을 SSE로 알림 (개별 Task 진행은 TaskWorker가 emit)
-      await this.sseService.publish(projectId, this.event('phase_completed', { phase: PipelinePhase.PHASE_2 }));
+      // pipelineRunId 포함 — 클라이언트가 태스크 목록 조회에 사용
+      await this.sseService.publish(
+        projectId,
+        this.event('phase_completed', { phase: PipelinePhase.PHASE_2, pipelineRunId }),
+      );
       await this.sseService.publish(projectId, this.event('phase_started', { phase: PipelinePhase.PHASE_3 }));
       const tasks = await this.taskRepo.find({
         where: { pipelineRunId, status: Not(TaskStatus.DONE) },
@@ -162,7 +163,8 @@ export class PipelineWorker extends WorkerHost {
       for (const task of tasks) {
         await this.taskQueue.add(
           TaskJobName.RUN,
-          { projectId, pipelineRunId, taskId: task.id, sessionId },
+          // taskName 포함 — TaskWorker가 task_started/task_completed 이벤트에 사용
+          { projectId, pipelineRunId, taskId: task.id, taskName: task.name, sessionId },
           { jobId: task.id },
         );
       }
@@ -171,13 +173,7 @@ export class PipelineWorker extends WorkerHost {
       // PipelineRun COMPLETED 판정은 TaskWorker → SANDBOX 잡 → handleSandbox()가 담당
       // 스트림은 Phase 3/4까지 이어지므로 여기서 complete()하지 않는다
     } catch (e) {
-      await this.pipelineRunRepo.update(
-        { id: pipelineRunId },
-        { status: PipelineStatus.FAILED, errorMessage: (e as Error).message },
-      );
-      // 실패를 SSE로 알리고 스트림 종료
-      await this.sseService.publish(projectId, this.event('pipeline_failed', { message: (e as Error).message }));
-      await this.sseService.complete(projectId);
+      await this.failPipeline(e, pipelineRunId, projectId);
       throw e;
     }
   }
@@ -219,13 +215,7 @@ export class PipelineWorker extends WorkerHost {
       await this.sseService.complete(projectId);
       this.logger.log(`Phase 4 complete — pipelineRunId=${pipelineRunId}`);
     } catch (e) {
-      await this.pipelineRunRepo.update(
-        { id: pipelineRunId },
-        { status: PipelineStatus.FAILED, errorMessage: (e as Error).message },
-      );
-      // 실패를 SSE로 알리고 스트림 종료
-      await this.sseService.publish(projectId, this.event('pipeline_failed', { message: (e as Error).message }));
-      await this.sseService.complete(projectId);
+      await this.failPipeline(e, pipelineRunId, projectId);
       throw e;
     } finally {
       // 성공/실패 무관하게 민감 정보(GitHub PAT, Claude API Key) 즉시 삭제
@@ -263,6 +253,18 @@ export class PipelineWorker extends WorkerHost {
     await this.projectRepo.update({ id: projectId }, { githubRepoUrl: repoUrl, githubRepoName: repoName });
     this.logger.log(`GitHub repo URL saved — projectId=${projectId} url=${repoUrl}`);
     return repoUrl;
+  }
+
+  // PipelineRun을 FAILED로 업데이트하고 SSE로 실패 이벤트를 전송한 후 스트림을 종료한다.
+  // 4개 핸들러의 catch 블록에서 공통으로 호출 — throw는 호출부가 직접 수행한다.
+  private async failPipeline(e: unknown, pipelineRunId: string, projectId: string): Promise<void> {
+    const message = (e as Error).message;
+    await this.pipelineRunRepo.update(
+      { id: pipelineRunId },
+      { status: PipelineStatus.FAILED, errorMessage: message },
+    );
+    await this.sseService.publish(projectId, this.event('pipeline_failed', { message }));
+    await this.sseService.complete(projectId);
   }
 
   // SseEvent 생성 헬퍼 — timestamp(ISO 8601)를 자동으로 채워 type/추가 필드와 합친다.

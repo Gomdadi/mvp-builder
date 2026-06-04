@@ -27,6 +27,11 @@ describe('TaskWorker', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     mockSessionService.getSession.mockResolvedValue(null);
+    // handleRun 상단의 rate limit 대기(5초)를 즉시 실행시켜 테스트 지연을 방지
+    jest.spyOn(global, 'setTimeout').mockImplementation((cb: (...args: any[]) => void) => {
+      cb();
+      return 0 as any;
+    });
     const module = await Test.createTestingModule({
       providers: [
         TaskWorker,
@@ -41,7 +46,7 @@ describe('TaskWorker', () => {
     worker = module.get(TaskWorker);
   });
 
-  const jobData = { projectId: 'p1', pipelineRunId: 'run-1', taskId: 't1' };
+  const jobData = { projectId: 'p1', pipelineRunId: 'run-1', taskId: 't1', taskName: 'Test Task' };
 
   describe('handleRun', () => {
     it('Phase3Service.run 호출 후 완료 판정을 수행한다', async () => {
@@ -55,6 +60,15 @@ describe('TaskWorker', () => {
       // sessionId 없으므로 claudeApiKey는 undefined (env 키 fallback)
       expect(mockPhase3Service.run).toHaveBeenCalledWith('p1', 't1', undefined);
       expect(mockPipelineRunRepo.update).not.toHaveBeenCalled();
+      // task_started/task_completed 이벤트에 taskName 포함 검증
+      expect(mockSseService.publish).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({ type: 'task_started', taskId: 't1', taskName: 'Test Task' }),
+      );
+      expect(mockSseService.publish).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({ type: 'task_completed', taskId: 't1', taskName: 'Test Task' }),
+      );
     });
 
     it('모든 Task가 DONE이면 PIPELINE_QUEUE에 SANDBOX 잡을 enqueue한다', async () => {

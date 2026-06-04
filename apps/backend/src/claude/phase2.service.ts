@@ -124,6 +124,13 @@ export class Phase2Service {
 
     const input = toolInput as TaskListInput;
 
+    // Claude가 generate_tasks 툴을 올바르게 호출했는지 검증 — tasks 필드 누락 시 TypeError 대신 명확한 에러
+    if (!Array.isArray(input?.tasks)) {
+      throw new Error(
+        `Phase 2: generate_tasks returned invalid structure — tasks field missing. Got: ${JSON.stringify(input)}`,
+      );
+    }
+
     // save(array): TypeORM에서 여러 엔티티를 한 번에 저장 (Prisma의 createMany에 대응)
     // create()로 인스턴스를 만들고 save()로 한 번에 INSERT
     await this.taskRepo.save(

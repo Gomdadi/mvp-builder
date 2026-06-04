@@ -61,7 +61,7 @@ describe('PipelineWorker', () => {
     const job = makeJob(PipelineJobName.START, { projectId: 'p1', pipelineRunId: 'run-1' });
 
     it('Phase1Service.run 호출 후 PipelineRun을 COMPLETED로 갱신한다', async () => {
-      mockPhase1Service.run.mockResolvedValue('doc-id');
+      mockPhase1Service.run.mockResolvedValue('doc-id-123');
 
       await worker.process(job as any);
 
@@ -70,6 +70,15 @@ describe('PipelineWorker', () => {
       expect(mockPipelineRunRepo.update).toHaveBeenCalledWith(
         { id: 'run-1' },
         expect.objectContaining({ status: PipelineStatus.COMPLETED }),
+      );
+      // phase_completed PHASE_1 이벤트에 phase1Service.run 반환값(analysisDocumentId) 포함 검증
+      expect(mockSseService.publish).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({
+          type: 'phase_completed',
+          phase: PipelinePhase.PHASE_1,
+          analysisDocumentId: 'doc-id-123',
+        }),
       );
     });
 
@@ -92,7 +101,7 @@ describe('PipelineWorker', () => {
     });
 
     it('Phase1Service.run에 feedbackText를 전달하고 COMPLETED로 갱신한다', async () => {
-      mockPhase1Service.run.mockResolvedValue('doc-id');
+      mockPhase1Service.run.mockResolvedValue('doc-id-456');
 
       await worker.process(job as any);
 
@@ -101,14 +110,23 @@ describe('PipelineWorker', () => {
         { id: 'run-1' },
         expect.objectContaining({ status: PipelineStatus.COMPLETED }),
       );
+      // 피드백 재실행 후 phase_completed PHASE_1 이벤트에 새 analysisDocumentId 포함 검증
+      expect(mockSseService.publish).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({
+          type: 'phase_completed',
+          phase: PipelinePhase.PHASE_1,
+          analysisDocumentId: 'doc-id-456',
+        }),
+      );
     });
   });
 
   describe('handleConfirm', () => {
     const job = makeJob(PipelineJobName.CONFIRM, { projectId: 'p1', pipelineRunId: 'run-1' });
     const fakeTasks = [
-      { id: 't1', status: TaskStatus.PENDING },
-      { id: 't2', status: TaskStatus.FAILED },
+      { id: 't1', name: 'Task A', status: TaskStatus.PENDING },
+      { id: 't2', name: 'Task B', status: TaskStatus.FAILED },
     ];
 
     it('Tasks가 없으면 Phase2를 실행하고 Task들을 큐에 enqueue한다', async () => {
@@ -125,16 +143,26 @@ describe('PipelineWorker', () => {
         { phase: PipelinePhase.PHASE_3 },
       );
       expect(mockTaskQueue.add).toHaveBeenCalledTimes(2);
+      // job data에 taskName 포함 검증 (TaskWorker가 이벤트에 사용)
       expect(mockTaskQueue.add).toHaveBeenCalledWith(
         TaskJobName.RUN,
-        expect.objectContaining({ taskId: 't1' }),
+        expect.objectContaining({ taskId: 't1', taskName: 'Task A' }),
         { jobId: 't1' },
+      );
+      // phase_completed PHASE_2 이벤트에 pipelineRunId 포함 검증
+      expect(mockSseService.publish).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({
+          type: 'phase_completed',
+          phase: PipelinePhase.PHASE_2,
+          pipelineRunId: 'run-1',
+        }),
       );
     });
 
     it('Tasks가 이미 있으면 Phase2를 skip하고 DONE 제외 Tasks만 enqueue한다', async () => {
       mockTaskRepo.count.mockResolvedValueOnce(3); // existingCount > 0 → Phase 2 skip
-      const nonDoneTasks = [{ id: 't2', status: TaskStatus.PENDING }];
+      const nonDoneTasks = [{ id: 't2', name: 'Task B', status: TaskStatus.PENDING }];
       mockTaskRepo.find.mockResolvedValue(nonDoneTasks);
 
       await worker.process(job as any);
@@ -143,7 +171,7 @@ describe('PipelineWorker', () => {
       expect(mockTaskQueue.add).toHaveBeenCalledTimes(1);
       expect(mockTaskQueue.add).toHaveBeenCalledWith(
         TaskJobName.RUN,
-        expect.objectContaining({ taskId: 't2' }),
+        expect.objectContaining({ taskId: 't2', taskName: 'Task B' }),
         { jobId: 't2' },
       );
     });

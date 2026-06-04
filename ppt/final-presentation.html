@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 기반 자동화 MVP 빌더 최종 발표</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <style>
+/* ============================== */
+/* 1. CORE VARIABLES              */
+/* ============================== */
+:root {
+  --primary-color: #0f172a;
+  --secondary-color: #0ea5e9;
+  --accent-color: #f8fafc;
+  --text-main: #334155;
+  --text-muted: #64748b;
+  --white: #ffffff;
+  --border-color: #cbd5e1;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background-color: #cbd5e1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 40px;
+  min-height: 100vh;
+  padding: 40px 0;
+}
+
+/* ============================== */
+/* 2. SLIDE BASE                  */
+/* ============================== */
+.slide-container {
+  background-color: var(--white);
+  border-radius: 12px;
+  box-shadow: 0 15px 35px rgba(0,0,0,0.1);
+  display: flex;
+  flex-direction: column;
+  font-family: 'Noto Sans KR', sans-serif;
+  height: 720px;
+  width: 1280px;
+  overflow: hidden;
+  padding: 52px 60px;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.slide-container::before {
+  content: '';
+  position: absolute;
+  top: 0; right: 0;
+  width: 300px; height: 300px;
+  background: radial-gradient(circle, rgba(14,165,233,0.05) 0%, rgba(255,255,255,0) 70%);
+  border-radius: 50%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.slide-container > * { position: relative; z-index: 1; }
+
+/* ============================== */
+/* 3. TYPOGRAPHY                  */
+/* ============================== */
+.slide-container h1,
+.slide-container h2,
+.slide-container h3,
+.slide-container th {
+  color: var(--primary-color);
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+
+.slide-container h1 { font-size: 56px; line-height: 1.2; margin-bottom: 20px; }
+
+.slide-container .slide-title {
+  font-size: 36px;
+  margin-bottom: 28px;
+  border-bottom: 3px solid var(--secondary-color);
+  padding-bottom: 10px;
+  display: inline-block;
+}
+
+.slide-container h3 { font-size: 21px; margin-bottom: 14px; }
+
+.slide-container p,
+.slide-container li,
+.slide-container td {
+  color: var(--text-main);
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.slide-container .subtitle { color: var(--text-muted); font-size: 22px; font-weight: 500; }
+
+.content-area { display: flex; flex-direction: column; flex-grow: 1; width: 100%; }
+
+/* ============================== */
+/* 4. TITLE LAYOUT                */
+/* ============================== */
+.title-layout {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  justify-content: center;
+  text-align: center;
+}
+.title-layout h1 { font-size: 64px; }
+.title-layout .subtitle { margin-top: 15px; max-width: 800px; }
+.title-layout .accent-line {
+  width: 80px; height: 6px;
+  background-color: var(--secondary-color);
+  margin: 36px auto;
+  border-radius: 3px;
+}
+
+/* ============================== */
+/* 5. TWO-COLUMN LAYOUT           */
+/* ============================== */
+.two-column { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; width: 100%; }
+.two-column.tiled { align-items: stretch; }
+.two-column.tiled > div {
+  background-color: var(--accent-color);
+  border-radius: 16px;
+  border: 1px solid var(--border-color);
+  padding: 26px 32px;
+  display: flex;
+  flex-direction: column;
+}
+.two-column.tiled h3 {
+  color: var(--secondary-color);
+  border-bottom: 2px solid #e2e8f0;
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+}
+.two-column ul { list-style: none; }
+.two-column li { margin-bottom: 11px; position: relative; padding-left: 20px; font-size: 15px; line-height: 1.55; }
+.two-column li::before { content: "•"; color: var(--secondary-color); font-size: 20px; position: absolute; left: 0; top: -4px; }
+
+/* ============================== */
+/* 6. TILED-CONTENT LAYOUT        */
+/* ============================== */
+.tiled-content { display: flex; gap: 24px; width: 100%; height: 100%; align-items: stretch; }
+
+.tile {
+  background-color: var(--accent-color);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  flex: 1;
+  padding: 30px 22px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.tile .icon {
+  background-color: var(--primary-color);
+  border-radius: 50%;
+  color: var(--white);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  height: 58px; width: 58px;
+  margin-bottom: 18px;
+  box-shadow: 0 8px 15px rgba(15,23,42,0.2);
+}
+.tile h3 { font-size: 19px; margin-bottom: 10px; }
+.tile p { font-size: 14px; }
+.tile ul { list-style: none; margin-top: 6px; }
+.tile li { margin-bottom: 10px; position: relative; padding-left: 18px; font-size: 14px; line-height: 1.5; color: var(--text-main); }
+.tile li::before { content: "•"; color: var(--secondary-color); font-size: 18px; position: absolute; left: 0; top: -3px; font-weight: bold; }
+
+/* Arrow between tiles */
+.tile:not(:last-child):not(.no-arrow)::after {
+  content: '\f0da';
+  font-family: 'Font Awesome 6 Free';
+  font-weight: 900;
+  color: var(--border-color);
+  font-size: 32px;
+  position: absolute;
+  right: -18px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+}
+.tile.no-arrow::after { display: none; }
+
+/* ============================== */
+/* 7. MISC COMPONENTS             */
+/* ============================== */
+.highlight-tag {
+  background-color: var(--secondary-color);
+  color: var(--white);
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 700;
+  display: inline-block;
+  margin-bottom: 10px;
+}
+
+.author-credit {
+  position: absolute;
+  right: 60px; bottom: 32px;
+  font-size: 14px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+code {
+  background-color: #e2e8f0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 0.88em;
+  color: #c53030;
+}
+
+img { border: none !important; outline: none !important; box-shadow: none !important; background: transparent; max-width: 100%; }
+
+/* ============================== */
+/* 8. CUSTOM: TOC (Slide 2)       */
+/* ============================== */
+.toc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  justify-content: center;
+  flex-grow: 1;
+}
+.toc-item { display: flex; align-items: center; gap: 22px; }
+.toc-num { font-size: 28px; font-weight: 700; color: var(--secondary-color); min-width: 56px; }
+.toc-label { font-size: 28px; font-weight: 700; color: var(--primary-color); }
+.toc-item.toc-sub .toc-label {
+  font-size: 21px;
+  font-weight: 500;
+  color: var(--text-muted);
+  padding-left: 32px;
+}
+.toc-item.toc-sub .toc-num { visibility: hidden; }
+.toc-item.toc-sub .toc-arrow { color: var(--secondary-color); font-size: 18px; margin-left: -8px; }
+
+/* ============================== */
+/* 9. CUSTOM: BREADCRUMB          */
+/* ============================== */
+.breadcrumb { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+.bc-main { font-size: 26px; font-weight: 700; color: var(--primary-color); }
+.bc-sep { color: var(--border-color); font-size: 16px; }
+.bc-sub { font-size: 19px; font-weight: 500; color: var(--text-muted); }
+
+/* ============================== */
+/* 10. CUSTOM: FLOW BOX (Slide 4) */
+/* ============================== */
+.flow-box {
+  background-color: var(--accent-color);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  width: 270px;
+  flex-shrink: 0;
+}
+.flow-step {
+  background-color: var(--white);
+  border: 2px solid var(--border-color);
+  border-radius: 10px;
+  padding: 11px 18px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-main);
+  width: 210px;
+}
+.flow-step.hl { border-color: var(--secondary-color); background-color: rgba(14,165,233,0.06); font-weight: 700; color: var(--primary-color); }
+.flow-step.ok { border-color: #10b981; background-color: rgba(16,185,129,0.06); }
+.flow-step.ng { border-color: #ef4444; background-color: rgba(239,68,68,0.06); }
+.flow-arr { color: var(--text-muted); font-size: 18px; margin: 7px 0; }
+.flow-branch { display: flex; gap: 10px; justify-content: center; }
+.flow-branch-col { display: flex; flex-direction: column; align-items: center; gap: 0; }
+.branch-label { font-size: 12px; font-weight: 700; margin-bottom: 5px; }
+.branch-label.ok { color: #059669; }
+.branch-label.ng { color: #dc2626; }
+.branch-box { font-size: 13px; padding: 8px 10px; width: 100px; line-height: 1.4; }
+
+/* ============================== */
+/* 11. CUSTOM: DEMO FLOW (Slide 8)*/
+/* ============================== */
+.demo-flow {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  height: 100%;
+}
+.demo-step {
+  flex: 1;
+  background-color: var(--accent-color);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 20px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 10px;
+}
+.demo-step .step-num { font-size: 26px; font-weight: 700; color: var(--secondary-color); line-height: 1; }
+.demo-step .step-icon { font-size: 28px; color: var(--primary-color); }
+.demo-step .step-label { font-size: 14px; font-weight: 700; color: var(--primary-color); line-height: 1.4; }
+.demo-step .step-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+.demo-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  color: var(--border-color);
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+/* ============================== */
+/* 12. PRINT                      */
+/* ============================== */
+@media print {
+  @page { size: 1280px 720px; margin: 0; }
+  body { background-color: transparent; padding: 0; margin: 0; display: block; }
+  .slide-container {
+    box-shadow: none;
+    border-radius: 0;
+    margin: 0;
+    width: 1280px;
+    height: 720px;
+    page-break-after: always;
+    break-after: page;
+    page-break-inside: avoid;
+  }
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+}
+    </style>
+</head>
+<body>
+
+<!-- ============================================ -->
+<!-- Slide 1: Title                               -->
+<!-- ============================================ -->
+<div class="slide-container" id="slide1">
+    <div class="title-layout">
+        <span class="highlight-tag">최종 발표</span>
+        <h1>AI 기반 자동화 MVP 빌더</h1>
+        <div class="accent-line"></div>
+        <p class="subtitle">사용자 소유권 기반, 실행 가능한 코드베이스 생성 파이프라인</p>
+    </div>
+    <p class="author-credit">2019920018 김준호</p>
+</div>
+
+<!-- ============================================ -->
+<!-- Slide 2: Table of Contents                   -->
+<!-- ============================================ -->
+<div class="slide-container" id="slide2">
+    <h2 class="slide-title">목차</h2>
+    <div class="content-area">
+        <div class="toc-list">
+            <div class="toc-item">
+                <span class="toc-num">01</span>
+                <span class="toc-label">서론 <span style="font-weight:400;color:var(--text-muted);font-size:21px;">(Recap)</span></span>
+            </div>
+            <div class="toc-item">
+                <span class="toc-num">02</span>
+                <span class="toc-label" style="font-size:32px;">핵심 차별성</span>
+            </div>
+            <div class="toc-item toc-sub">
+                <span class="toc-num">02</span>
+                <span class="toc-arrow"><i class="fa-solid fa-turn-down"></i></span>
+                <span class="toc-label">테스트 과정</span>
+            </div>
+            <div class="toc-item">
+                <span class="toc-num">03</span>
+                <span class="toc-label">기술적 챌린지</span>
+            </div>
+            <div class="toc-item">
+                <span class="toc-num">04</span>
+                <span class="toc-label">데모</span>
+            </div>
+            <div class="toc-item">
+                <span class="toc-num">05</span>
+                <span class="toc-label">제한점 &amp; 향후 방향</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================ -->
+<!-- Slide 3: Recap                               -->
+<!-- ============================================ -->
+<div class="slide-container" id="slide3">
+    <h2 class="slide-title">서론 — Recap</h2>
+    <div class="content-area">
+        <div class="two-column tiled" style="flex-grow:1;">
+            <div>
+                <h3>기존 플랫폼의 한계</h3>
+                <ul>
+                    <li>플랫폼 자체 토큰·크레딧 기반 과금 — <strong>비용 예측이 어렵고 불투명</strong></li>
+                    <li>브라우저 실행 환경 종속 — <strong>기술 스택 선택의 자유도 제한</strong></li>
+                    <li>결과물이 플랫폼 내부에 머무름 — <strong>완전한 코드 소유권 보장 불가</strong></li>
+                    <li>비개발자: 외주 비용 부담 / 개발자: 보일러플레이트 반복 작업에 시간 소모</li>
+                </ul>
+            </div>
+            <div>
+                <h3>MVP Builder의 목표</h3>
+                <ul>
+                    <li>자연어 입력 → 분석 문서 → 사용자 확인 → <strong>실행 가능한 코드 자동 생성</strong></li>
+                    <li><strong>사용자 GitHub에 직접 Repository 생성</strong> — 즉각적인 후속 개발 가능</li>
+                    <li>사용자 API Key 직접 사용 — <strong>플랫폼 과금 없이 투명한 비용 구조</strong></li>
+                    <li>Docker 기반 실행 환경 — <strong>기술 스택·아키텍처 선택권 사용자에게 보장</strong></li>
+                    <li><strong>서버 내부 샌드박스 테스팅</strong>으로 코드 검증 — 생성 직후 실제 컨테이너에서 실행해 동작 여부 확인</li>
+                    <li><code>docker compose up --build</code>로 즉시 실행 가능한 MVP 전달</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================ -->
+<!-- Slide 4: 테스트 과정 ① (Docker 상세)          -->
+<!-- ============================================ -->
+<div class="slide-container" id="slide4">
+    <div class="breadcrumb">
+        <span class="bc-main">핵심 차별성</span>
+        <span class="bc-sep"><i class="fa-solid fa-chevron-right"></i></span>
+        <span class="bc-sub">테스트 과정</span>
+    </div>
+    <div class="content-area" style="flex-direction:row; gap:28px;">
+        <!-- Left: two stacked cards -->
+        <div style="flex:1; display:flex; flex-direction:column; gap:18px;">
+            <div class="tile no-arrow" style="flex:1; padding:22px 26px;">
+                <span class="highlight-tag">Phase 3 — per-task Sandbox</span>
+                <ul style="margin-top:6px;">
+                    <li>태스크마다 <strong>test 파일 → impl 파일</strong> 순서로 생성 (TDD)</li>
+                    <li>생성 직후 Docker 컨테이너를 띄워 <strong>즉시 실행 검증</strong> — 실패 시 impl 재생성 (최대 3회)</li>
+                    <li>통과 시 S3에 저장 후 다음 태스크로 진행</li>
+                </ul>
+            </div>
+            <div class="tile no-arrow" style="flex:1; padding:22px 26px;">
+                <span class="highlight-tag" style="background-color:#0369a1;">Phase 4 — 종합 Sandbox</span>
+                <ul style="margin-top:6px;">
+                    <li>Phase 3 완료 후 S3의 <strong>전체 파일을 모아</strong> 한 번에 Docker 실행</li>
+                    <li>크로스 태스크 의존성 검증 — per-task에서 잡지 못한 오류 포착</li>
+                    <li>실패 시 Claude debug loop (<code>read_files</code> → <code>generate_implementation_code</code>, 최대 10회)</li>
+                </ul>
+            </div>
+        </div>
+        <!-- Right: flow box -->
+        <div class="flow-box">
+            <div class="flow-step hl">test 파일 생성</div>
+            <div class="flow-arr"><i class="fa-solid fa-arrow-down"></i></div>
+            <div class="flow-step hl">impl 파일 생성</div>
+            <div class="flow-arr"><i class="fa-solid fa-arrow-down"></i></div>
+            <div class="flow-step">Docker compose up<br><span style="font-size:12px;color:var(--text-muted);">per-task sandbox</span></div>
+            <div class="flow-arr"><i class="fa-solid fa-arrow-down"></i></div>
+            <div class="flow-branch">
+                <div class="flow-branch-col">
+                    <div class="branch-label ok">통과</div>
+                    <div class="flow-step ok branch-box">다음 테스크<br>→ S3 저장</div>
+                </div>
+                <div class="flow-branch-col">
+                    <div class="branch-label ng">실패</div>
+                    <div class="flow-step ng branch-box">impl 재생성<br>(최대 3회)</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================ -->
+<!-- Slide 5: 파이프라인 전체 흐름 (5 phases)       -->
+<!-- ============================================ -->
+<div class="slide-container" id="slide5">
+    <div class="breadcrumb">
+        <span class="bc-main">핵심 차별성</span>
+        <span class="bc-sep"><i class="fa-solid fa-chevron-right"></i></span>
+        <span class="bc-sub">테스트 과정 — 파이프라인 전체 흐름</span>
+    </div>
+    <div class="content-area">
+        <div class="tiled-content">
+            <!-- Phase 1 -->
+            <div class="tile" style="padding:22px 16px;">
+                <div class="icon" style="height:50px;width:50px;font-size:20px;margin-bottom:14px;"><i class="fa-solid fa-file-signature"></i></div>
+                <span class="highlight-tag">Phase 1</span>
+                <h3 style="font-size:16px;margin-top:6px;margin-bottom:8px;">분석 문서 생성</h3>
+                <ul>
+                    <li>ERD, API 설계</li>
+                    <li>아키텍처 초안</li>
+                    <li>디렉토리 구조</li>
+                    <li>사용자 확인 후 확정</li>
+                </ul>
+            </div>
+            <!-- Phase 2 -->
+            <div class="tile" style="padding:22px 16px;">
+                <div class="icon" style="height:50px;width:50px;font-size:20px;margin-bottom:14px;"><i class="fa-solid fa-list-check"></i></div>
+                <span class="highlight-tag">Phase 2</span>
+                <h3 style="font-size:16px;margin-top:6px;margin-bottom:8px;">태스크 분해</h3>
+                <ul>
+                    <li>구현 단위 분해</li>
+                    <li>orderIndex 순서 보장</li>
+                    <li>Backend / Frontend 분류</li>
+                </ul>
+            </div>
+            <!-- Phase 3 -->
+            <div class="tile" style="padding:22px 16px;">
+                <div class="icon" style="height:50px;width:50px;font-size:20px;margin-bottom:14px;"><i class="fa-solid fa-code"></i></div>
+                <span class="highlight-tag">Phase 3</span>
+                <h3 style="font-size:16px;margin-top:6px;margin-bottom:8px;">코드 생성</h3>
+                <ul>
+                    <li>Backend: TDD 방식</li>
+                    <li>test → impl 순서</li>
+                    <li>per-task sandbox 검증</li>
+                    <li>Frontend: UI 컴포넌트</li>
+                </ul>
+            </div>
+            <!-- Phase 4 -->
+            <div class="tile" style="padding:22px 16px;">
+                <div class="icon" style="height:50px;width:50px;font-size:20px;margin-bottom:14px;background-color:#0369a1;"><i class="fa-solid fa-shield-halved"></i></div>
+                <span class="highlight-tag" style="background-color:#0369a1;">Phase 4</span>
+                <h3 style="font-size:16px;margin-top:6px;margin-bottom:8px;">종합 검증</h3>
+                <ul>
+                    <li>전체 파일 sandbox</li>
+                    <li>크로스 의존성 검증</li>
+                    <li>Claude debug loop</li>
+                    <li>최대 10회 자동 수정</li>
+                </ul>
+            </div>
+            <!-- GitHub Push -->
+            <div class="tile no-arrow" style="padding:22px 16px;">
+                <div class="icon" style="height:50px;width:50px;font-size:20px;margin-bottom:14px;background-color:#1d4ed8;"><i class="fa-brands fa-github"></i></div>
+                <span class="highlight-tag" style="background-color:#1d4ed8;">GitHub</span>
+                <h3 style="font-size:16px;margin-top:6px;margin-bottom:8px;">Repository 전달</h3>
+                <ul>
+                    <li>저장소 자동 생성</li>
+                    <li>전체 파일 Push</li>
+                    <li><code style="font-size:11px;">docker compose up</code></li>
+                    <li>즉시 실행 가능</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================ -->
+<!-- Slide 6: 핵심 차별성 요약 (3 tiles)            -->
+<!-- ============================================ -->
+<div class="slide-container" id="slide6">
+    <h2 class="slide-title">핵심 차별성</h2>
+    <div class="content-area">
+        <div class="tiled-content">
+            <div class="tile no-arrow">
+                <div class="icon" style="background-color:#10b981;"><i class="fa-solid fa-coins"></i></div>
+                <h3>투명한 비용 구조</h3>
+                <ul>
+                    <li>사용자 <strong>API Key를 직접 사용</strong> — 플랫폼 자체 과금 없음</li>
+                    <li>실제 모델 사용량 기준의 <strong>투명한 비용 구조</strong></li>
+                    <li>크레딧 소진 걱정 없이 아이디어 검증 가능</li>
+                </ul>
+            </div>
+            <div class="tile no-arrow">
+                <div class="icon" style="background-color:#f59e0b;"><i class="fa-solid fa-layer-group"></i></div>
+                <h3>기술 스택 자유도</h3>
+                <ul>
+                    <li>원하는 스택·아키텍처를 <strong>자유롭게 지정</strong> 가능</li>
+                    <li>Docker 기반 실행 환경 — <strong>로컬 및 클라우드 이식성 확보</strong></li>
+                    <li>플랫폼 내부 환경 종속 없음</li>
+                </ul>
+            </div>
+            <div class="tile no-arrow">
+                <div class="icon" style="background-color:#8b5cf6;"><i class="fa-brands fa-github"></i></div>
+                <h3>완전한 코드 소유권</h3>
+                <ul>
+                    <li>결과물을 <strong>사용자 GitHub에 직접 생성</strong></li>
+                    <li>온전한 코드 소유권 — <strong>즉각적인 후속 개발 가능</strong></li>
+                    <li>플랫폼 이탈 후에도 독립 개발 가능</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================ -->
+<!-- Slide 7: 기술적 챌린지                         -->
+<!-- ============================================ -->
+<div class="slide-container" id="slide7">
+    <h2 class="slide-title">기술적 챌린지</h2>
+    <div class="content-area">
+        <div class="two-column tiled" style="flex-grow:1;">
+            <div>
+                <h3>프롬프트 &amp; 에러 수정</h3>
+                <ul>
+                    <li><strong>프롬프트 설계 난이도:</strong> 실행 가능한 코드를 안정적으로 생성하도록 시스템 프롬프트·툴 description을 반복 튜닝 — 작은 지시 변화가 결과물 품질에 큰 영향</li>
+                    <li><strong>토큰 비용 관리:</strong> Phase 3에서 파일별 컨텍스트 주입 시 입력 토큰 급증 — 최소 필요 정보만 주입하는 압축 전략 필요</li>
+                    <li><strong>에러 수정 과정의 어려움:</strong> Claude가 실패 로그를 받아 파일 수정 시, 잘못된 파일을 고치거나 수정 범위가 과도하게 넓어지는 문제 발생 — 디버그 루프 프롬프트 정밀 설계 필요</li>
+                    <li><strong>컨텍스트 유지:</strong> <code>runAgentLoop</code>에서 대화 히스토리 증가로 응답 품질 저하 — tool_result 크기 제한 및 히스토리 트리밍 설계</li>
+                </ul>
+            </div>
+            <div>
+                <h3>비동기 &amp; 루프</h3>
+                <ul>
+                    <li><strong>비동기 큐 처리:</strong> BullMQ worker에서 Phase 1→2→3→4 순서 보장 + SSE 실시간 스트리밍을 Redis pub/sub으로 분리 — 워커 재시작 시 중복 실행 방지</li>
+                    <li><strong>테스트 루프 설계:</strong> per-task sandbox(3회) → 종합 sandbox(10회)의 이중 루프 — 실패 시 Claude에게 적절한 에러 컨텍스트를 전달하는 포맷 설계</li>
+                    <li><strong>Docker 샌드박스 도입:</strong> 서버 실행 환경에서 격리된 테스팅 환경을 구축하기 위해 <code>dockerode-compose</code>로 컨테이너를 직접 띄워 Docker 샌드박스 환경 구축</li>
+                    <li><strong>크로스 태스크 의존성:</strong> Phase 3 per-task는 이전 파일 없이 실행돼 import 오류 발생 가능 — Phase 4에서 전체 파일 모아 재검증</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================ -->
+<!-- Slide 8: 데모                                 -->
+<!-- ============================================ -->
+<div class="slide-container" id="slide8">
+    <h2 class="slide-title">데모</h2>
+    <div class="content-area">
+        <div class="demo-flow">
+            <div class="demo-step">
+                <div class="step-num">1</div>
+                <div class="step-icon"><i class="fa-solid fa-pen-to-square"></i></div>
+                <div class="step-label">아이디어 입력</div>
+                <div class="step-desc">자연어로 서비스 요구사항 및 기술 스택 입력</div>
+            </div>
+            <div class="demo-arrow"><i class="fa-solid fa-chevron-right"></i></div>
+            <div class="demo-step">
+                <div class="step-num">2</div>
+                <div class="step-icon"><i class="fa-solid fa-file-signature"></i></div>
+                <div class="step-label">Phase 1 분석</div>
+                <div class="step-desc">ERD · API · 아키텍처 · 디렉토리 문서 자동 생성</div>
+            </div>
+            <div class="demo-arrow"><i class="fa-solid fa-chevron-right"></i></div>
+            <div class="demo-step">
+                <div class="step-num">3</div>
+                <div class="step-icon"><i class="fa-solid fa-circle-check"></i></div>
+                <div class="step-label">사용자 확인</div>
+                <div class="step-desc">분석 문서 검토 및 승인 (수정 요청 가능)</div>
+            </div>
+            <div class="demo-arrow"><i class="fa-solid fa-chevron-right"></i></div>
+            <div class="demo-step">
+                <div class="step-num">4</div>
+                <div class="step-icon"><i class="fa-solid fa-code"></i></div>
+                <div class="step-label">Phase 2/3 코드 생성</div>
+                <div class="step-desc">태스크 분해 → TDD 기반 코드 생성 → per-task 검증</div>
+            </div>
+            <div class="demo-arrow"><i class="fa-solid fa-chevron-right"></i></div>
+            <div class="demo-step">
+                <div class="step-num">5</div>
+                <div class="step-icon"><i class="fa-solid fa-shield-halved"></i></div>
+                <div class="step-label">Phase 4 종합 검증</div>
+                <div class="step-desc">전체 파일 sandbox · Claude debug loop 자동 수정</div>
+            </div>
+            <div class="demo-arrow"><i class="fa-solid fa-chevron-right"></i></div>
+            <div class="demo-step">
+                <div class="step-num">6</div>
+                <div class="step-icon"><i class="fa-brands fa-github"></i></div>
+                <div class="step-label">GitHub 전달</div>
+                <div class="step-desc">Repository 생성 · Push<br><code style="font-size:11px;">docker compose up --build</code></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================ -->
+<!-- Slide 9: 제한점 & 향후 발전 방향               -->
+<!-- ============================================ -->
+<div class="slide-container" id="slide9">
+    <h2 class="slide-title">제한점 &amp; 향후 발전 방향</h2>
+    <div class="content-area">
+        <div class="two-column tiled" style="flex-grow:1;">
+            <div>
+                <h3>현재 제한점</h3>
+                <ul>
+                    <li>지원 기술 스택 범위가 한정적 — 검증된 스택 외 안정성 보장 어려움</li>
+                    <li>복잡한 비즈니스 로직의 생성 코드 품질 보장 어려움</li>
+                    <li>Docker 이미지 pull 시간으로 인한 파이프라인 전체 지연</li>
+                    <li>생성 코드의 보안 취약점 자동 검사 미비</li>
+                </ul>
+            </div>
+            <div>
+                <h3>향후 발전 방향</h3>
+                <ul>
+                    <li>더 많은 기술 스택 프리셋 지원 (Spring Boot, Django, Ruby on Rails 등)</li>
+                    <li>코드 품질 자동 리뷰 단계 추가 (정적 분석·보안 스캔)</li>
+                    <li>Docker 이미지 캐싱으로 파이프라인 속도 개선</li>
+                    <li>사용자 실시간 피드백 루프 강화 — 생성 중 수정 요청 가능</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================ -->
+<!-- Slide 10: 감사합니다                           -->
+<!-- ============================================ -->
+<div class="slide-container" id="slide10">
+    <div class="title-layout">
+        <div style="font-size:64px;color:var(--secondary-color);margin-bottom:25px;">
+            <i class="fa-solid fa-paper-plane"></i>
+        </div>
+        <h1 style="font-size:80px;margin-bottom:10px;">감사합니다</h1>
+        <div class="accent-line" style="margin:30px auto;"></div>
+    </div>
+    <p class="author-credit">2019920018 김준호</p>
+</div>
+
+</body>
+</html>

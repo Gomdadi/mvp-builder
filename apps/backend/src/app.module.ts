@@ -7,6 +7,7 @@ import { PipelineModule } from './pipeline/pipeline.module';
 import { SessionModule } from './session/session.module';
 import { GithubModule } from './github/github.module';
 import { SseModule } from './sse/sse.module';
+import { ProjectsModule } from './projects/projects.module';
 import { Project } from './entities/project.entity';
 import { AnalysisDocument } from './entities/analysis-document.entity';
 import { PipelineRun } from './entities/pipeline-run.entity';
@@ -46,6 +47,7 @@ import { Task } from './entities/task.entity';
     SessionModule, // POST /v1/session — GitHub PAT + Claude API Key를 Redis에 임시 저장
     GithubModule, // Phase 4 완료 후 생성 코드를 GitHub repo에 push
     SseModule, // GET /v1/pipeline/:projectId/stream — 파이프라인 진행 상황 SSE 실시간 스트리밍
+    ProjectsModule, // 프로젝트 CRUD + 분석 문서/태스크/생성 파일 조회 API
   ],
   controllers: [AppController],
 })

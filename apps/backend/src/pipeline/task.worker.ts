@@ -38,10 +38,15 @@ export class TaskWorker extends WorkerHost {
   // phase3Service.run()이 내부에서 Task.status=DONE or FAILED를 갱신.
   // finally 블록에서 완료 판정 — 모든 Task가 처리되면 Phase 4 SANDBOX 잡을 enqueue
   private async handleRun(job: Job): Promise<void> {
-    const { projectId, pipelineRunId, taskId, sessionId } = job.data as {
+    // rate limit 방지 — 태스크 간 연속 Claude API 호출을 막기 위한 최소 대기.
+    // concurrency=1로 태스크가 직렬 처리되므로 완료 즉시 다음 태스크의 API 호출이 몰리는 것을 5초 간격으로 완화한다.
+    await new Promise<void>((resolve) => setTimeout(resolve, 5000));
+
+    const { projectId, pipelineRunId, taskId, taskName, sessionId } = job.data as {
       projectId: string;
       pipelineRunId: string;
       taskId: string;
+      taskName?: string;
       sessionId?: string;
     };
 
@@ -54,6 +59,7 @@ export class TaskWorker extends WorkerHost {
       await this.sseService.publish(projectId, {
         type: 'task_started',
         taskId,
+        taskName, // 클라이언트가 진행 중인 Task 이름을 표시할 수 있도록 포함
         timestamp: new Date().toISOString(),
       });
       await this.phase3Service.run(projectId, taskId, session?.claudeApiKey);
@@ -61,6 +67,7 @@ export class TaskWorker extends WorkerHost {
       await this.sseService.publish(projectId, {
         type: 'task_completed',
         taskId,
+        taskName, // 완료된 Task 이름 포함
         timestamp: new Date().toISOString(),
       });
       this.logger.log(`Task complete — taskId=${taskId}`);
@@ -118,6 +125,22 @@ export class TaskWorker extends WorkerHost {
       this.logger.log(`All tasks done, SANDBOX job enqueued — pipelineRunId=${pipelineRunId}`);
     } catch (e) {
       this.logger.error(`finalizePipelineIfComplete error: ${(e as Error).message}`);
+      // DB 오류·큐 오류 발생 시 파이프라인이 영구히 PHASE_3에 멈추지 않도록 FAILED 처리.
+      // 이 try/catch가 실패해도 throw하지 않음 — Task 재시도 트리거 방지
+      try {
+        await this.pipelineRunRepo.update(
+          { id: pipelineRunId },
+          { status: PipelineStatus.FAILED, errorMessage: (e as Error).message },
+        );
+        await this.sseService.publish(projectId, {
+          type: 'pipeline_failed',
+          message: (e as Error).message,
+          timestamp: new Date().toISOString(),
+        });
+        await this.sseService.complete(projectId);
+      } catch (inner) {
+        this.logger.error(`Failed to mark pipeline as failed: ${(inner as Error).message}`);
+      }
     }
   }
 }

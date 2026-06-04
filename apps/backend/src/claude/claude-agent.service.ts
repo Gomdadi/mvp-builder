@@ -23,6 +23,8 @@ export interface AgentLoopOptions {
   maxIterations?: number;
   // 세션에서 가져온 Claude API Key — env의 CLAUDE_API_KEY 대신 이 키로 호출한다.
   apiKey?: string;
+  // Phase별로 다른 모델을 사용할 때 지정. 미지정 시 서비스 기본 모델 사용
+  model?: string;
 }
 
 // ClaudeAgentService가 받는 공통 옵션
@@ -158,23 +160,25 @@ export class ClaudeAgentService {
   // tool_choice: 'auto' — Claude가 어떤 툴을 언제 호출할지 스스로 판단.
   // 시스템 프롬프트에서 호출 순서를 지시해야 올바른 순서 보장됨.
   async runAgentLoop(options: AgentLoopOptions): Promise<void> {
-    const { messages, system, tools, onToolCall, maxTokens = 8192, maxIterations = 10, apiKey } = options;
+    const { messages, system, tools, onToolCall, maxTokens = 8192, maxIterations = 10, apiKey, model } = options;
     // 루프 전체에서 동일한 클라이언트 인스턴스를 재사용 — 반복마다 생성하지 않음
     const client = this.getClient(apiKey);
+
+    // system과 tools는 루프 전체에서 변하지 않으므로 루프 바깥에서 한 번만 캐시 형태로 준비
+    const cachedSystem = system ? this.toCachedSystem(system) : undefined;
+    const cachedTools = this.withCacheControl(tools);
 
     // 대화 히스토리 — 루프를 돌며 assistant 응답과 tool_result가 누적됨
     const history: Anthropic.MessageParam[] = [...messages];
 
     for (let i = 0; i < maxIterations; i++) {
       const response = await client.messages.create({
-        model: this.model,
-        max_tokens: maxTokens, messages: history,
-        // system이 있을 때만 { system: system }을 펼쳐 포함시킴.
-        // system && { system }: system이 truthy면 { system: '...' } 반환, falsy면 undefined 반환.
-        // ...undefined는 아무 프로퍼티도 추가하지 않으므로 system이 없으면 키 자체가 생략됨.
-        ...(system && { system }),
-        // tools는 { tools: tools }의 축약형 (ES6 단축 프로퍼티명)
-        tools,
+        model: model ?? this.model,
+        max_tokens: maxTokens,
+        messages: history,
+        // system이 있을 때만 포함 — undefined를 spread하면 키가 생략됨
+        ...(cachedSystem && { system: cachedSystem }),
+        tools: cachedTools,
         // auto: Claude가 툴 사용 여부와 순서를 결정. 시스템 프롬프트로 순서 유도
         tool_choice: { type: 'auto' },
       } as Anthropic.MessageCreateParamsNonStreaming);
@@ -191,7 +195,14 @@ export class ClaudeAgentService {
         for (const block of response.content) {
           if (block.type === 'tool_use') {
             this.logger.debug(`Tool called: ${block.name}`);
-            const result = await onToolCall(block.name, block.input);
+            let result: string;
+            try {
+              result = await onToolCall(block.name, block.input);
+            } catch (e) {
+              // onToolCall 에러 시 에러 메시지를 tool_result로 전달 — history 일관성 보장
+              result = `Error: ${(e as Error).message}`;
+              this.logger.warn(`Tool call error (${block.name}): ${result}`);
+            }
             toolResults.push({
               type: 'tool_result',
               // tool_use_id: Claude가 발급한 ID — tool_result와 tool_use를 연결하는 키
@@ -201,8 +212,10 @@ export class ClaudeAgentService {
           }
         }
 
-        // tool_result를 user 메시지로 전달 — Claude가 결과를 보고 다음 툴을 호출
-        history.push({ role: 'user', content: toolResults });
+        // toolResults가 비어있으면 push하지 않음 — 빈 배열이 user 메시지로 들어가면 다음 API 호출에서 400 에러 발생
+        if (toolResults.length > 0) {
+          history.push({ role: 'user', content: toolResults });
+        }
       }
 
       if (i === maxIterations - 1) {
@@ -223,6 +236,7 @@ export class ClaudeAgentService {
     };
 
     // system은 선택값 — 없으면 파라미터에 포함하지 않음
+    // runWithTool()은 단건 호출이므로 캐시 히트가 없어 cache_control을 붙이지 않는다 (1.25x 손해 방지)
     if (system) params.system = system;
 
     if (tools && tools.length > 0) {
@@ -234,5 +248,22 @@ export class ClaudeAgentService {
     }
 
     return params;
+  }
+
+  // 시스템 프롬프트 문자열을 TextBlockParam 배열로 변환하고 cache_control을 붙인다.
+  // Anthropic은 cache_control이 붙은 블록까지의 모든 토큰을 캐싱한다(TTL 5분).
+  private toCachedSystem(system: string): Anthropic.TextBlockParam[] {
+    return [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }];
+  }
+
+  // 툴 배열의 마지막 항목에 cache_control을 추가한다.
+  // Anthropic은 마지막 cache point까지의 모든 토큰을 캐싱하므로 마지막 툴에만 붙이면 된다.
+  private withCacheControl(tools: Anthropic.Tool[]): Anthropic.Tool[] {
+    if (tools.length === 0) return tools;
+    return tools.map((tool, idx) =>
+      idx === tools.length - 1
+        ? { ...tool, cache_control: { type: 'ephemeral' } }
+        : tool,
+    );
   }
 }

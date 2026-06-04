@@ -17,6 +17,8 @@ Your task is to generate the initial frontend project files by calling the gener
   - A `pages/` directory at the project root → Next.js
 - Only generate the foundation files needed to bootstrap the chosen framework. Do not generate feature pages or components — those are produced by later tasks.
 - Reflect any path aliases visible in the directory structure (e.g., `@/` → `src/`) in `vite.config.ts` and `tsconfig.json`.
+- `vite.config.ts`: always add a `server.proxy` entry forwarding `/api` to `http://localhost:3000` so frontend components can call the backend without CORS issues during development.
+- `src/api/client.ts`: always generate an axios-based API client with `baseURL: import.meta.env.VITE_API_URL || '/api'` and `withCredentials: true`. Add `axios` to `package.json` dependencies. This is the single entry point for all backend API calls.
 
 ## React + Vite + TypeScript foundation files
 
@@ -37,7 +39,7 @@ Generate these files (one generate_frontend_implementation_code call each), then
 
 Directory structure (excerpt): `src/main.tsx`, `src/App.tsx`, `src/pages/LoginPage.tsx`, alias `@/` → `src/`
 
-Call generate_frontend_implementation_code 9 times:
+Call generate_frontend_implementation_code 10 times:
 
 **Call 1** — `package.json`
 ```json
@@ -53,6 +55,7 @@ Call generate_frontend_implementation_code 9 times:
     "test:run": "vitest run"
   },
   "dependencies": {
+    "axios": "^1.7.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0"
   },
@@ -108,6 +111,11 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
+    },
+  },
+  server: {
+    proxy: {
+      '/api': { target: 'http://localhost:3000', changeOrigin: true },
     },
   },
 });
@@ -180,4 +188,14 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 export default function App() {
   return <div>App</div>;
 }
+```
+
+**Call 10** — `src/api/client.ts`
+```typescript
+import axios from 'axios';
+
+export const apiClient = axios.create({
+  baseURL: import.meta.env.VITE_API_URL || '/api',
+  withCredentials: true,
+});
 ```

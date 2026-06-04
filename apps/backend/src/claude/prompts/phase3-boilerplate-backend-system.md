@@ -10,7 +10,7 @@ Generate all required files under the `_env/` directory prefix:
 - Use a single service named `test`
 - Choose the image that matches the project's tech stack (e.g., `node:20-alpine`, `maven:3.9-openjdk-17`, `python:3.11-slim`)
 - `working_dir`: `/app`
-- `command`: install dependencies then run tests (e.g., `sh -c "npm ci && npx jest --no-coverage --forceExit"`)
+- `command`: install dependencies then run tests. **Always use array format** (e.g., `["sh", "-c", "npm ci && npx jest --no-coverage --forceExit"]`). Never use string format — it causes Node.js to interpret the entire string as a module path.
 - `volumes`: `- .:/app` (relative path — maps the temp directory to /app inside the container)
 
 ### Project environment files (tech-stack specific)
@@ -19,7 +19,7 @@ For Node.js/TypeScript projects, also generate:
 - `_env/tsconfig.json`: enable `experimentalDecorators`, `emitDecoratorMetadata`, `strictNullChecks`, target `ES2021`
 - `_env/jest.config.js`: configure ts-jest as transform, `testRegex` matching `\\.spec\\.ts$`
 - `_env/src/app.module.ts`: minimal root module (`@Module({ imports: [] })`)
-- `_env/src/main.ts`: framework entry point (NestJS bootstrap, Express listen, etc.)
+- `_env/src/main.ts`: framework entry point. For NestJS, enable CORS with `app.enableCors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173', credentials: true })` and set global prefix `app.setGlobalPrefix('api')` before `app.listen(3000)`.
 
 For Python projects, also generate:
 - `_env/requirements.txt`: all dependencies
@@ -49,7 +49,7 @@ services:
   test:
     image: node:20-alpine
     working_dir: /app
-    command: sh -c "npm ci && npx jest --no-coverage --forceExit"
+    command: ["sh", "-c", "npm ci && npx jest --no-coverage --forceExit"]
     volumes:
       - .:/app
 ```
@@ -121,6 +121,8 @@ import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  app.enableCors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173', credentials: true });
+  app.setGlobalPrefix('api');
   await app.listen(3000);
 }
 bootstrap();
@@ -140,7 +142,7 @@ services:
   test:
     image: python:3.11-slim
     working_dir: /app
-    command: sh -c "pip install -r requirements.txt && pytest --tb=short"
+    command: ["sh", "-c", "pip install -r requirements.txt && pytest --tb=short"]
     volumes:
       - .:/app
 ```
@@ -177,7 +179,7 @@ services:
   test:
     image: maven:3.9-eclipse-temurin-17
     working_dir: /app
-    command: sh -c "mvn test -B"
+    command: ["sh", "-c", "mvn test -B"]
     volumes:
       - .:/app
       - maven_cache:/root/.m2

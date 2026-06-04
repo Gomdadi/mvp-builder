@@ -85,13 +85,25 @@
 
 #### T-E5-01: 프로젝트 생성 및 조회 API 구현
 - **유형**: 개발
-- **설명**: `POST /v1/projects`, `GET /v1/projects/:id`. 세션 기반 구조로 인증 없음 — 목록 조회 제외 (클라이언트가 localStorage에 projectId 보관)
+- **설명**: 세션 기반 구조로 인증 없음 — 목록 조회 제외 (클라이언트가 localStorage에 projectId 보관)
 - **선행 태스크**: 없음
 - **완료 기준**:
   - [ ] `POST /v1/projects` — DTO class-validator: name(1~200자), requirements(10~10000자), techStack 필수
-  - [ ] `GET /v1/projects/:id` — 프로젝트 상세 + 확정된 분석 문서(isConfirmed=true) 포함
-  - [ ] 존재하지 않는 projectId 요청 시 404 반환
-  - [ ] Unit Test: 생성→상세조회→404 검증
+  - [ ] `GET /v1/projects/:id` — 프로젝트 상세 조회. 존재하지 않으면 404
+  - [ ] `GET /v1/analysis-documents/:id` — Phase 1 완료 후 ERD, API 스펙, 아키텍처 조회. 존재하지 않으면 404
+  - [ ] `GET /v1/pipeline-runs/:id/tasks` — Phase 2 완료 후 태스크 목록 조회 (id, name, type, orderIndex, status)
+  - [ ] `GET /v1/projects/:id/files` — pipeline_completed 후 S3에서 전체 파일 경로를 트리 구조로 반환
+  - [ ] `GET /v1/projects/:id/files?path=...` — 개별 파일 내용 반환 (S3 다운로드)
+  - [ ] Unit Test: 각 엔드포인트 정상/404 케이스
+
+#### T-E5-02: SSE 이벤트 페이로드 보강
+- **유형**: 개발
+- **설명**: phase_completed 이벤트에 조회 API 호출에 필요한 id 추가. task 이벤트에 taskName 추가
+- **선행 태스크**: T-E5-01
+- **완료 기준**:
+  - [ ] `phase_completed PHASE_1` 이벤트에 `analysisDocumentId` 추가
+  - [ ] `phase_completed PHASE_2` 이벤트에 `pipelineRunId` 추가
+  - [ ] `task_started` / `task_completed` 이벤트에 `taskName` 추가
 
 ---
 

@@ -5,12 +5,15 @@ import { PipelineWorker } from './pipeline.worker';
 import { TASK_QUEUE, PipelineJobName, TaskJobName } from './pipeline.constants';
 import { Phase1Service } from '../claude/phase1.service';
 import { Phase2Service } from '../claude/phase2.service';
+import { Phase4Service } from '../claude/phase4.service';
 import { PipelineRun } from '../entities/pipeline-run.entity';
 import { Task } from '../entities/task.entity';
 import { PipelinePhase, PipelineStatus, TaskStatus } from '../entities/enums';
+import { PIPELINE_QUEUE } from './pipeline.constants';
 
 const mockPhase1Service = { run: jest.fn() };
 const mockPhase2Service = { run: jest.fn() };
+const mockPhase4Service = { run: jest.fn() };
 const mockTaskQueue = { add: jest.fn() };
 const mockPipelineRunRepo = { update: jest.fn() };
 const mockTaskRepo = { count: jest.fn(), find: jest.fn() };
@@ -27,6 +30,7 @@ describe('PipelineWorker', () => {
         PipelineWorker,
         { provide: Phase1Service, useValue: mockPhase1Service },
         { provide: Phase2Service, useValue: mockPhase2Service },
+        { provide: Phase4Service, useValue: mockPhase4Service },
         { provide: getQueueToken(TASK_QUEUE), useValue: mockTaskQueue },
         { provide: getRepositoryToken(PipelineRun), useValue: mockPipelineRunRepo },
         { provide: getRepositoryToken(Task), useValue: mockTaskRepo },
@@ -131,6 +135,36 @@ describe('PipelineWorker', () => {
       mockPhase2Service.run.mockRejectedValue(new Error('phase2 error'));
 
       await expect(worker.process(job as any)).rejects.toThrow('phase2 error');
+      expect(mockPipelineRunRepo.update).toHaveBeenCalledWith(
+        { id: 'run-1' },
+        expect.objectContaining({ status: PipelineStatus.FAILED }),
+      );
+    });
+  });
+
+  describe('handleSandbox', () => {
+    const job = makeJob(PipelineJobName.SANDBOX, { projectId: 'p1', pipelineRunId: 'run-1' });
+
+    it('Phase4Service.run 완료 시 PipelineRun을 PHASE_4 → COMPLETED로 갱신한다', async () => {
+      mockPhase4Service.run.mockResolvedValue(undefined);
+
+      await worker.process(job as any);
+
+      expect(mockPipelineRunRepo.update).toHaveBeenCalledWith(
+        { id: 'run-1' },
+        { phase: PipelinePhase.PHASE_4 },
+      );
+      expect(mockPhase4Service.run).toHaveBeenCalledWith('p1');
+      expect(mockPipelineRunRepo.update).toHaveBeenCalledWith(
+        { id: 'run-1' },
+        expect.objectContaining({ status: PipelineStatus.COMPLETED }),
+      );
+    });
+
+    it('Phase4Service.run 실패 시 PipelineRun을 FAILED로 갱신하고 예외를 re-throw한다', async () => {
+      mockPhase4Service.run.mockRejectedValue(new Error('sandbox failed'));
+
+      await expect(worker.process(job as any)).rejects.toThrow('sandbox failed');
       expect(mockPipelineRunRepo.update).toHaveBeenCalledWith(
         { id: 'run-1' },
         expect.objectContaining({ status: PipelineStatus.FAILED }),

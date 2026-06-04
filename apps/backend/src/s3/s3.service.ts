@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { S3_BUCKET, S3_CLIENT } from './s3.constants';
 
 // S3 키 패턴의 단일 진실 공급원.
@@ -24,6 +24,17 @@ export class S3Service {
         ContentType: 'text/plain',
       }),
     );
+  }
+
+  // Phase 4에서 프로젝트의 전체 생성 파일 경로 목록을 조회.
+  // _env/ 파일(보일러플레이트)도 포함 — DockerSandboxService가 prefix를 자동 처리.
+  // MVP 규모에서 1000개 초과 없으므로 페이지네이션 생략
+  async listGeneratedFiles(projectId: string): Promise<string[]> {
+    const prefix = `generated/${projectId}/`;
+    const response = await this.s3.send(
+      new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix }),
+    );
+    return (response.Contents ?? []).map((obj) => obj.Key!.replace(prefix, ''));
   }
 
   // T-E9-01 GitHubService에서 S3 코드를 읽어 GitHub에 push할 때 사용

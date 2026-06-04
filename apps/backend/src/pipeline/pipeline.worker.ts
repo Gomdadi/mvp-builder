@@ -6,6 +6,7 @@ import { Job, Queue } from 'bullmq';
 import { Not, Repository } from 'typeorm';
 import { Phase1Service } from '../claude/phase1.service';
 import { Phase2Service } from '../claude/phase2.service';
+import { Phase4Service } from '../claude/phase4.service';
 import { PipelineRun } from '../entities/pipeline-run.entity';
 import { Task } from '../entities/task.entity';
 import { PipelinePhase, PipelineStatus, TaskStatus } from '../entities/enums';
@@ -21,6 +22,7 @@ export class PipelineWorker extends WorkerHost {
   constructor(
     private readonly phase1Service: Phase1Service,
     private readonly phase2Service: Phase2Service,
+    private readonly phase4Service: Phase4Service,
     @InjectQueue(TASK_QUEUE) private readonly taskQueue: Queue,
     @InjectRepository(PipelineRun) private readonly pipelineRunRepo: Repository<PipelineRun>,
     @InjectRepository(Task) private readonly taskRepo: Repository<Task>,
@@ -41,6 +43,9 @@ export class PipelineWorker extends WorkerHost {
         break;
       case PipelineJobName.CONFIRM:
         await this.handleConfirm(job);
+        break;
+      case PipelineJobName.SANDBOX:
+        await this.handleSandbox(job);
         break;
       default:
         this.logger.warn(`Unknown job name: ${job.name}`);
@@ -115,7 +120,28 @@ export class PipelineWorker extends WorkerHost {
       }
 
       this.logger.log(`Phase 2 complete, ${tasks.length} tasks enqueued — pipelineRunId=${pipelineRunId}`);
-      // PipelineRun 완료 판정은 TaskWorker가 마지막 Task 처리 후 수행
+      // PipelineRun COMPLETED 판정은 TaskWorker → SANDBOX 잡 → handleSandbox()가 담당
+    } catch (e) {
+      await this.pipelineRunRepo.update(
+        { id: pipelineRunId },
+        { status: PipelineStatus.FAILED, errorMessage: (e as Error).message },
+      );
+      throw e;
+    }
+  }
+
+  // Phase 4: 전체 생성 파일의 종합 sandbox 검증.
+  // TaskWorker가 모든 Task DONE 후 enqueue하며, 통과 시 PipelineRun COMPLETED 처리
+  private async handleSandbox(job: Job): Promise<void> {
+    const { projectId, pipelineRunId } = job.data as { projectId: string; pipelineRunId: string };
+    try {
+      await this.pipelineRunRepo.update({ id: pipelineRunId }, { phase: PipelinePhase.PHASE_4 });
+      await this.phase4Service.run(projectId);
+      await this.pipelineRunRepo.update(
+        { id: pipelineRunId },
+        { status: PipelineStatus.COMPLETED, completedAt: new Date() },
+      );
+      this.logger.log(`Phase 4 complete — pipelineRunId=${pipelineRunId}`);
     } catch (e) {
       await this.pipelineRunRepo.update(
         { id: pipelineRunId },

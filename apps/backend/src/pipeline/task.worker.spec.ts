@@ -1,12 +1,15 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { getQueueToken } from '@nestjs/bullmq';
 import { TaskWorker } from './task.worker';
 import { Phase3Service } from '../claude/phase3.service';
 import { PipelineRun } from '../entities/pipeline-run.entity';
 import { Task } from '../entities/task.entity';
 import { PipelineStatus, TaskStatus } from '../entities/enums';
+import { PIPELINE_QUEUE, PipelineJobName } from './pipeline.constants';
 
 const mockPhase3Service = { run: jest.fn() };
+const mockPipelineQueue = { add: jest.fn() };
 const mockPipelineRunRepo = { update: jest.fn() };
 const mockTaskRepo = { count: jest.fn() };
 
@@ -21,6 +24,7 @@ describe('TaskWorker', () => {
       providers: [
         TaskWorker,
         { provide: Phase3Service, useValue: mockPhase3Service },
+        { provide: getQueueToken(PIPELINE_QUEUE), useValue: mockPipelineQueue },
         { provide: getRepositoryToken(PipelineRun), useValue: mockPipelineRunRepo },
         { provide: getRepositoryToken(Task), useValue: mockTaskRepo },
       ],
@@ -43,19 +47,22 @@ describe('TaskWorker', () => {
       expect(mockPipelineRunRepo.update).not.toHaveBeenCalled();
     });
 
-    it('모든 Task가 DONE이면 PipelineRun을 COMPLETED로 갱신한다', async () => {
+    it('모든 Task가 DONE이면 PIPELINE_QUEUE에 SANDBOX 잡을 enqueue한다', async () => {
       mockPhase3Service.run.mockResolvedValue(undefined);
       mockTaskRepo.count
         .mockResolvedValueOnce(2)  // total
         .mockResolvedValueOnce(2)  // doneOrFailed === total
         .mockResolvedValueOnce(0); // failedCount
+      mockPipelineQueue.add.mockResolvedValue(undefined);
 
       await worker.process(makeJob(jobData) as any);
 
-      expect(mockPipelineRunRepo.update).toHaveBeenCalledWith(
-        { id: 'run-1' },
-        expect.objectContaining({ status: PipelineStatus.COMPLETED }),
+      // COMPLETED 마크 대신 SANDBOX 잡 enqueue
+      expect(mockPipelineQueue.add).toHaveBeenCalledWith(
+        PipelineJobName.SANDBOX,
+        { projectId: 'p1', pipelineRunId: 'run-1' },
       );
+      expect(mockPipelineRunRepo.update).not.toHaveBeenCalled();
     });
 
     it('FAILED Task가 있으면 PipelineRun을 FAILED로 갱신한다', async () => {

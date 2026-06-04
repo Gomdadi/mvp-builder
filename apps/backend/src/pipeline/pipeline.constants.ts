@@ -8,6 +8,7 @@ export enum PipelineJobName {
   START = 'pipeline.start',
   FEEDBACK = 'pipeline.feedback',
   CONFIRM = 'pipeline.confirm',
+  SANDBOX = 'pipeline.sandbox', // Phase 4 종합 sandbox 검증 진입점
 }
 
 export enum TaskJobName {

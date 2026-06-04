@@ -14,6 +14,7 @@ export enum PipelinePhase {
   PHASE_1 = 'PHASE_1',
   PHASE_2 = 'PHASE_2',
   PHASE_3 = 'PHASE_3',
+  PHASE_4 = 'PHASE_4', // 종합 sandbox 검증 단계
 }
 
 export enum PipelineStatus {

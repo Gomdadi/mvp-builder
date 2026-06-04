@@ -8,10 +8,13 @@ import { Task } from '../entities/task.entity';
 import { PipelineStatus, TaskStatus } from '../entities/enums';
 import { PIPELINE_QUEUE, PipelineJobName } from './pipeline.constants';
 import { SessionService } from '../session/session.service';
+import { SseService } from '../sse/sse.service';
 
 const mockPhase3Service = { run: jest.fn() };
 // 기본 getSession → null (세션 없음, env 키 fallback)
 const mockSessionService = { getSession: jest.fn().mockResolvedValue(null) };
+// SseService mock — task_started/task_completed publish 호출 흡수
+const mockSseService = { publish: jest.fn().mockResolvedValue(undefined), complete: jest.fn().mockResolvedValue(undefined) };
 const mockPipelineQueue = { add: jest.fn() };
 const mockPipelineRunRepo = { update: jest.fn() };
 const mockTaskRepo = { count: jest.fn() };
@@ -29,6 +32,7 @@ describe('TaskWorker', () => {
         TaskWorker,
         { provide: Phase3Service, useValue: mockPhase3Service },
         { provide: SessionService, useValue: mockSessionService },
+        { provide: SseService, useValue: mockSseService },
         { provide: getQueueToken(PIPELINE_QUEUE), useValue: mockPipelineQueue },
         { provide: getRepositoryToken(PipelineRun), useValue: mockPipelineRunRepo },
         { provide: getRepositoryToken(Task), useValue: mockTaskRepo },

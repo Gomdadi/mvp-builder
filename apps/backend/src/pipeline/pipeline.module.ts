@@ -14,6 +14,7 @@ import { ClaudeModule } from '../claude/claude.module';
 import { SessionModule } from '../session/session.module';
 import { GithubModule } from '../github/github.module';
 import { S3Module } from '../s3/s3.module';
+import { SseModule } from '../sse/sse.module';
 
 // defaultJobOptions 공통 옵션 — PIPELINE_QUEUE, TASK_QUEUE 둘 다 동일하게 적용
 const DEFAULT_JOB_OPTIONS = {
@@ -29,6 +30,7 @@ const DEFAULT_JOB_OPTIONS = {
     SessionModule,   // SessionService — Worker가 Redis에서 apiKey/githubToken 조회
     GithubModule,    // GithubService — Phase 4 완료 후 repo 생성 + push
     S3Module,        // S3Service — GitHub push 시 생성 파일 다운로드
+    SseModule,       // SseService — Worker가 파이프라인 진행 상황을 SSE로 publish
 
     // BullModule.registerQueue: 이 모듈에서 사용할 큐를 등록
     BullModule.registerQueue(

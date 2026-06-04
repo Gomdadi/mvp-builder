@@ -14,6 +14,7 @@ import { PIPELINE_QUEUE } from './pipeline.constants';
 import { SessionService } from '../session/session.service';
 import { GithubService } from '../github/github.service';
 import { S3Service } from '../s3/s3.service';
+import { SseService } from '../sse/sse.service';
 
 const mockPhase1Service = { run: jest.fn() };
 const mockPhase2Service = { run: jest.fn() };
@@ -22,6 +23,8 @@ const mockPhase4Service = { run: jest.fn() };
 const mockSessionService = { getSession: jest.fn().mockResolvedValue(null), deleteSession: jest.fn() };
 const mockGithubService = { pushFiles: jest.fn() };
 const mockS3Service = { listGeneratedFiles: jest.fn(), downloadGeneratedFile: jest.fn() };
+// SseService mock — publish/complete는 비동기. 이벤트 emit 호출만 흡수
+const mockSseService = { publish: jest.fn().mockResolvedValue(undefined), complete: jest.fn().mockResolvedValue(undefined) };
 const mockTaskQueue = { add: jest.fn() };
 const mockPipelineRunRepo = { update: jest.fn() };
 const mockTaskRepo = { count: jest.fn(), find: jest.fn() };
@@ -44,6 +47,7 @@ describe('PipelineWorker', () => {
         { provide: SessionService, useValue: mockSessionService },
         { provide: GithubService, useValue: mockGithubService },
         { provide: S3Service, useValue: mockS3Service },
+        { provide: SseService, useValue: mockSseService },
         { provide: getQueueToken(TASK_QUEUE), useValue: mockTaskQueue },
         { provide: getRepositoryToken(PipelineRun), useValue: mockPipelineRunRepo },
         { provide: getRepositoryToken(Task), useValue: mockTaskRepo },

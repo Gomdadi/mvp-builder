@@ -10,6 +10,7 @@ import { Task } from '../entities/task.entity';
 import { PipelineStatus, TaskStatus } from '../entities/enums';
 import { PIPELINE_QUEUE, TASK_QUEUE, PipelineJobName } from './pipeline.constants';
 import { SessionService } from '../session/session.service';
+import { SseService } from '../sse/sse.service';
 
 // concurrency: 1 — FIFO 직렬 처리로 orderIndex 순서를 보장한다.
 // Phase 3 Task는 보일러플레이트(orderIndex=0) → 백엔드/프론트엔드 순서로 처리되어야 하므로 직렬이 필수
@@ -20,6 +21,8 @@ export class TaskWorker extends WorkerHost {
   constructor(
     private readonly phase3Service: Phase3Service,
     private readonly sessionService: SessionService,
+    // SseService: Phase 3 개별 Task 시작/완료를 SSE 클라이언트에 실시간 전달
+    private readonly sseService: SseService,
     @InjectQueue(PIPELINE_QUEUE) private readonly pipelineQueue: Queue,
     @InjectRepository(PipelineRun) private readonly pipelineRunRepo: Repository<PipelineRun>,
     @InjectRepository(Task) private readonly taskRepo: Repository<Task>,
@@ -47,7 +50,19 @@ export class TaskWorker extends WorkerHost {
     try {
       // 세션에서 claudeApiKey를 꺼낸다. 없으면 env 키 fallback (ClaudeAgentService 내부 처리)
       const session = await this.sessionService.getSession(sessionId ?? '');
+      // Task 시작을 SSE로 알림 (complete()는 호출하지 않음 — 파이프라인 종료는 PipelineWorker가 담당)
+      await this.sseService.publish(projectId, {
+        type: 'task_started',
+        taskId,
+        timestamp: new Date().toISOString(),
+      });
       await this.phase3Service.run(projectId, taskId, session?.claudeApiKey);
+      // Task 완료를 SSE로 알림
+      await this.sseService.publish(projectId, {
+        type: 'task_completed',
+        taskId,
+        timestamp: new Date().toISOString(),
+      });
       this.logger.log(`Task complete — taskId=${taskId}`);
     } catch (e) {
       // phase3Service.run()이 예외 발생 전 Task.status=FAILED 갱신을 처리

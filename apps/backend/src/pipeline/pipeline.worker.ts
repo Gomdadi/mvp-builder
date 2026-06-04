@@ -15,6 +15,8 @@ import { PIPELINE_QUEUE, TASK_QUEUE, PipelineJobName, TaskJobName } from './pipe
 import { SessionService } from '../session/session.service';
 import { GithubService } from '../github/github.service';
 import { S3Service } from '../s3/s3.service';
+import { SseService } from '../sse/sse.service';
+import { SseEvent } from '../sse/sse.types';
 
 // @Processor: 이 클래스가 PIPELINE_QUEUE의 잡을 소비하는 Worker임을 선언
 // BullMQ가 Redis 큐에서 잡을 꺼낼 때 process() 메서드를 자동으로 호출
@@ -30,6 +32,8 @@ export class PipelineWorker extends WorkerHost {
     private readonly sessionService: SessionService,
     private readonly githubService: GithubService,
     private readonly s3Service: S3Service,
+    // SseService: 파이프라인 진행 상황을 Redis pub/sub으로 SSE 클라이언트에 실시간 전달
+    private readonly sseService: SseService,
     @InjectQueue(TASK_QUEUE) private readonly taskQueue: Queue,
     @InjectRepository(PipelineRun) private readonly pipelineRunRepo: Repository<PipelineRun>,
     @InjectRepository(Task) private readonly taskRepo: Repository<Task>,
@@ -70,17 +74,25 @@ export class PipelineWorker extends WorkerHost {
     try {
       // 세션에서 claudeApiKey를 꺼낸다. 없으면 env 키 fallback (ClaudeAgentService 내부 처리)
       const session = await this.sessionService.getSession(sessionId ?? '');
+      // Phase 1 시작을 SSE로 알림
+      await this.sseService.publish(projectId, this.event('phase_started', { phase: PipelinePhase.PHASE_1 }));
       await this.phase1Service.run(projectId, undefined, session?.claudeApiKey);
       await this.pipelineRunRepo.update(
         { id: pipelineRunId },
         { status: PipelineStatus.COMPLETED, completedAt: new Date() },
       );
+      // Phase 1 완료 통지 후 스트림 종료 (사용자 검토 대기 단계로 진입하므로 이번 run의 스트림은 마감)
+      await this.sseService.publish(projectId, this.event('phase_completed', { phase: PipelinePhase.PHASE_1 }));
+      await this.sseService.complete(projectId);
       this.logger.log(`Phase 1 complete — pipelineRunId=${pipelineRunId}`);
     } catch (e) {
       await this.pipelineRunRepo.update(
         { id: pipelineRunId },
         { status: PipelineStatus.FAILED, errorMessage: (e as Error).message },
       );
+      // 실패를 SSE로 알리고 스트림 종료
+      await this.sseService.publish(projectId, this.event('pipeline_failed', { message: (e as Error).message }));
+      await this.sseService.complete(projectId);
       throw e; // BullMQ retry 트리거
     }
   }
@@ -95,17 +107,24 @@ export class PipelineWorker extends WorkerHost {
     };
     try {
       const session = await this.sessionService.getSession(sessionId ?? '');
+      // Phase 1 (피드백) 재시작을 SSE로 알림
+      await this.sseService.publish(projectId, this.event('phase_started', { phase: PipelinePhase.PHASE_1 }));
       await this.phase1Service.run(projectId, feedbackText, session?.claudeApiKey);
       await this.pipelineRunRepo.update(
         { id: pipelineRunId },
         { status: PipelineStatus.COMPLETED, completedAt: new Date() },
       );
+      // Phase 1 완료 통지 후 스트림 종료 (다시 사용자 검토 대기 단계로 진입)
+      await this.sseService.publish(projectId, this.event('phase_completed', { phase: PipelinePhase.PHASE_1 }));
+      await this.sseService.complete(projectId);
       this.logger.log(`Phase 1 (feedback) complete — pipelineRunId=${pipelineRunId}`);
     } catch (e) {
       await this.pipelineRunRepo.update(
         { id: pipelineRunId },
         { status: PipelineStatus.FAILED, errorMessage: (e as Error).message },
       );
+      await this.sseService.publish(projectId, this.event('pipeline_failed', { message: (e as Error).message }));
+      await this.sseService.complete(projectId);
       throw e;
     }
   }
@@ -126,12 +145,17 @@ export class PipelineWorker extends WorkerHost {
       const existingCount = await this.taskRepo.count({ where: { pipelineRunId } });
       if (existingCount === 0) {
         await this.pipelineRunRepo.update({ id: pipelineRunId }, { phase: PipelinePhase.PHASE_2 });
+        // Phase 2 시작을 SSE로 알림
+        await this.sseService.publish(projectId, this.event('phase_started', { phase: PipelinePhase.PHASE_2 }));
         await this.phase2Service.run(projectId, pipelineRunId, session?.claudeApiKey);
       }
 
       // DONE 제외한 Tasks를 orderIndex 오름차순으로 task 큐에 enqueue
       // BullMQ 재시도 시 이미 DONE인 Task는 큐에 넣지 않음 (resume 전략)
       await this.pipelineRunRepo.update({ id: pipelineRunId }, { phase: PipelinePhase.PHASE_3 });
+      // Phase 2 완료 → Phase 3 시작을 SSE로 알림 (개별 Task 진행은 TaskWorker가 emit)
+      await this.sseService.publish(projectId, this.event('phase_completed', { phase: PipelinePhase.PHASE_2 }));
+      await this.sseService.publish(projectId, this.event('phase_started', { phase: PipelinePhase.PHASE_3 }));
       const tasks = await this.taskRepo.find({
         where: { pipelineRunId, status: Not(TaskStatus.DONE) },
         order: { orderIndex: 'ASC' },
@@ -147,11 +171,15 @@ export class PipelineWorker extends WorkerHost {
 
       this.logger.log(`Phase 2 complete, ${tasks.length} tasks enqueued — pipelineRunId=${pipelineRunId}`);
       // PipelineRun COMPLETED 판정은 TaskWorker → SANDBOX 잡 → handleSandbox()가 담당
+      // 스트림은 Phase 3/4까지 이어지므로 여기서 complete()하지 않는다
     } catch (e) {
       await this.pipelineRunRepo.update(
         { id: pipelineRunId },
         { status: PipelineStatus.FAILED, errorMessage: (e as Error).message },
       );
+      // 실패를 SSE로 알리고 스트림 종료
+      await this.sseService.publish(projectId, this.event('pipeline_failed', { message: (e as Error).message }));
+      await this.sseService.complete(projectId);
       throw e;
     }
   }
@@ -170,11 +198,15 @@ export class PipelineWorker extends WorkerHost {
 
     try {
       await this.pipelineRunRepo.update({ id: pipelineRunId }, { phase: PipelinePhase.PHASE_4 });
+      // Phase 4 시작을 SSE로 알림
+      await this.sseService.publish(projectId, this.event('phase_started', { phase: PipelinePhase.PHASE_4 }));
       await this.phase4Service.run(projectId, session?.claudeApiKey);
 
-      // Phase 4 통과 후 GitHub repo 생성 + 생성 코드 push
+      // Phase 4 통과 후 GitHub repo 생성 + 생성 코드 push.
+      // pushToGitHub가 repo URL을 반환하면 pipeline_completed 이벤트에 포함한다.
+      let githubRepoUrl: string | undefined;
       if (session?.githubToken) {
-        await this.pushToGitHub(projectId, session.githubToken, session.isPrivate);
+        githubRepoUrl = await this.pushToGitHub(projectId, session.githubToken, session.isPrivate);
       } else {
         this.logger.warn(`No githubToken in session — skipping GitHub push for project ${projectId}`);
       }
@@ -183,12 +215,19 @@ export class PipelineWorker extends WorkerHost {
         { id: pipelineRunId },
         { status: PipelineStatus.COMPLETED, completedAt: new Date() },
       );
+      // Phase 4 완료 → 파이프라인 전체 성공을 SSE로 알리고 스트림 종료. githubRepoUrl 포함
+      await this.sseService.publish(projectId, this.event('phase_completed', { phase: PipelinePhase.PHASE_4 }));
+      await this.sseService.publish(projectId, this.event('pipeline_completed', { githubRepoUrl }));
+      await this.sseService.complete(projectId);
       this.logger.log(`Phase 4 complete — pipelineRunId=${pipelineRunId}`);
     } catch (e) {
       await this.pipelineRunRepo.update(
         { id: pipelineRunId },
         { status: PipelineStatus.FAILED, errorMessage: (e as Error).message },
       );
+      // 실패를 SSE로 알리고 스트림 종료
+      await this.sseService.publish(projectId, this.event('pipeline_failed', { message: (e as Error).message }));
+      await this.sseService.complete(projectId);
       throw e;
     } finally {
       // 성공/실패 무관하게 민감 정보(GitHub PAT, Claude API Key) 즉시 삭제
@@ -200,7 +239,8 @@ export class PipelineWorker extends WorkerHost {
   }
 
   // S3의 생성 파일을 다운로드해 GitHub repo에 push하고 Project.githubRepoUrl을 업데이트한다.
-  private async pushToGitHub(projectId: string, githubToken: string, isPrivate: boolean): Promise<void> {
+  // 생성된 repo URL을 반환해 호출부(handleSandbox)가 pipeline_completed 이벤트에 포함할 수 있게 한다.
+  private async pushToGitHub(projectId: string, githubToken: string, isPrivate: boolean): Promise<string> {
     const project = await this.projectRepo.findOneOrFail({ where: { id: projectId } });
 
     // Project.name을 GitHub repo 이름으로 변환 — kebab-case, 특수문자 제거
@@ -224,5 +264,11 @@ export class PipelineWorker extends WorkerHost {
     // DB에 repo URL 저장 — 이후 사용자가 링크를 확인할 수 있도록
     await this.projectRepo.update({ id: projectId }, { githubRepoUrl: repoUrl, githubRepoName: repoName });
     this.logger.log(`GitHub repo URL saved — projectId=${projectId} url=${repoUrl}`);
+    return repoUrl;
+  }
+
+  // SseEvent 생성 헬퍼 — timestamp(ISO 8601)를 자동으로 채워 type/추가 필드와 합친다.
+  private event(type: SseEvent['type'], extra: Partial<SseEvent> = {}): SseEvent {
+    return { type, timestamp: new Date().toISOString(), ...extra };
   }
 }

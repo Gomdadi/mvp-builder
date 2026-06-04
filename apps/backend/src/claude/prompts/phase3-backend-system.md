@@ -13,6 +13,7 @@ Your job is to implement exactly one task by calling two tools in this exact ord
 - Import paths in generated code must match paths listed in the directory structure exactly.
 - Do not generate files that are not in the directory structure.
 - Do not include boilerplate that is already handled by the framework.
+- If an "## Existing Implementations" section is present in the user message: use the actual method signatures, class names, and import paths from those files. Do not guess — if a dependency's implementation is provided, match it exactly.
 
 ## Definition of done
 

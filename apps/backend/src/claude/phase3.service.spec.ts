@@ -22,9 +22,12 @@ const mockClaudeAgent = { runAgentLoop: jest.fn() };
 const mockTaskRepo = { findOneOrFail: jest.fn(), update: jest.fn() };
 const mockAnalysisDocumentRepo = { findOne: jest.fn() };
 
-// S3Service mock — uploadGeneratedFile만 사용 (Phase3는 sandbox 없음)
+// S3Service mock — uploadGeneratedFile + 이전 구현 파일 주입에 쓰이는 list/download
 const mockS3Service = {
   uploadGeneratedFile: jest.fn(),
+  // 기본값: 이전 파일 없음 → 기존 테스트는 Existing Implementations 섹션 없이 동작
+  listGeneratedFiles: jest.fn().mockResolvedValue([]),
+  downloadGeneratedFile: jest.fn(),
 };
 
 // ── 테스트 픽스처 ─────────────────────────────────────────────────────────────
@@ -57,11 +60,14 @@ const fakeFrontendBoilerplateTask = {
 };
 
 // isConfirmed=true인 확정 분석 문서
+// directoryStructure에는 구현 파일만 포함 — 테스트 파일은 Phase 3가 생성하므로 제외
 const confirmedDoc = {
   id: 'doc-1',
   directoryStructure: [
-    { path: 'src/user/user.service.ts', role: 'User CRUD service', dependencies: [] },
-    { path: 'src/user/user.service.spec.ts', role: 'User service tests', dependencies: ['src/user/user.service.ts'] },
+    { path: 'src/user/user.entity.ts', role: 'TypeORM entity for User', dependencies: [] },
+    { path: 'src/user/user.service.ts', role: 'User CRUD service', dependencies: ['src/user/user.entity.ts'] },
+    { path: 'src/components/Button.tsx', role: 'Reusable Button component', dependencies: [] },
+    { path: 'src/pages/LoginPage.tsx', role: 'Login page component', dependencies: ['src/components/Button.tsx'] },
   ],
   designSystem: null,
 };
@@ -109,6 +115,8 @@ describe('Phase3Service', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     mockReadFileSync.mockReturnValue('mocked prompt');
+    // clearAllMocks가 리턴값도 초기화하므로 기본값(이전 파일 없음) 재설정
+    mockS3Service.listGeneratedFiles.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -222,6 +230,23 @@ describe('Phase3Service', () => {
       expect(mockS3Service.uploadGeneratedFile).toHaveBeenCalledWith(
         'proj-1', 'src/user/user.service.ts', expect.any(String),
       );
+    });
+
+    it('이전 구현 파일이 있으면 userContent에 Existing Implementations 섹션을 포함한다', async () => {
+      mockTaskRepo.findOneOrFail.mockResolvedValue(fakeTask);
+      mockAnalysisDocumentRepo.findOne.mockResolvedValue(confirmedDoc);
+      // 이전 task가 생성한 엔티티 파일이 S3에 존재
+      mockS3Service.listGeneratedFiles.mockResolvedValue(['src/user/user.entity.ts']);
+      mockS3Service.downloadGeneratedFile.mockResolvedValue('export class User { id: string; }');
+      mockS3Service.uploadGeneratedFile.mockResolvedValue(undefined);
+      mockTaskRepo.update.mockResolvedValue({});
+      mockClaudeAgent.runAgentLoop.mockImplementation(simulateAgentLoop);
+
+      await service.run('proj-1', 'task-1');
+
+      const callArgs = mockClaudeAgent.runAgentLoop.mock.calls[0][0];
+      expect(callArgs.messages[0].content).toContain('## Existing Implementations');
+      expect(callArgs.messages[0].content).toContain('user.entity.ts');
     });
 
     // ── Backend 실패 케이스 ────────────────────────────────────────────────────
@@ -347,6 +372,23 @@ describe('Phase3Service', () => {
       await expect(service.run('proj-1', 'task-2')).rejects.toThrow('Phase 3 frontend incomplete');
       expect(mockS3Service.uploadGeneratedFile).not.toHaveBeenCalled();
       expect(mockTaskRepo.update).toHaveBeenNthCalledWith(2, { id: 'task-2' }, { status: 'FAILED' });
+    });
+
+    it('[frontend] 이전 구현 파일이 있으면 userContent에 Existing Implementations 섹션을 포함한다', async () => {
+      mockTaskRepo.findOneOrFail.mockResolvedValue(fakeFrontendTask);
+      mockAnalysisDocumentRepo.findOne.mockResolvedValue(confirmedDoc);
+      // 이전 task가 생성한 컴포넌트 파일이 S3에 존재
+      mockS3Service.listGeneratedFiles.mockResolvedValue(['src/components/Button.tsx']);
+      mockS3Service.downloadGeneratedFile.mockResolvedValue('export function Button() {}');
+      mockS3Service.uploadGeneratedFile.mockResolvedValue(undefined);
+      mockTaskRepo.update.mockResolvedValue({});
+      mockClaudeAgent.runAgentLoop.mockImplementation(simulateFrontendAgentLoop);
+
+      await service.run('proj-1', 'task-2');
+
+      const callArgs = mockClaudeAgent.runAgentLoop.mock.calls[0][0];
+      expect(callArgs.messages[0].content).toContain('## Existing Implementations');
+      expect(callArgs.messages[0].content).toContain('Button.tsx');
     });
 
     it('[frontend] runAgentLoop 실패 시 FAILED로 갱신하고 S3 업로드를 하지 않는다', async () => {

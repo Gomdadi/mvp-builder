@@ -27,6 +27,21 @@ Each task must include a `type` field:
 
 Assign type based on the target file path. If the directory structure contains a frontend directory (e.g., `src/`, `pages/`, `components/`, `app/` under a frontend root), tasks targeting those paths are `FRONTEND`.
 
+## API Spec compliance (required for all tasks)
+
+Every task description must reflect the API Specification exactly — endpoint paths, HTTP methods, request/response shapes must match the API Spec provided. Do not invent endpoints or field names.
+
+- **BACKEND tasks** that implement an API endpoint must include:
+  - HTTP method and path (e.g., `POST /auth/login`)
+  - Request body fields and types (e.g., `{ email: string, password: string }`)
+  - Response shape and status codes (e.g., `200 { accessToken: string }`, `401 on invalid credentials`)
+- **FRONTEND tasks** that call a backend API must include:
+  - Which API endpoint(s) the component calls (method + path, from the API Spec)
+  - The request payload it sends
+  - The response fields it consumes and how (e.g., store accessToken, display user.name)
+
+If a frontend component does not call any backend API (e.g., a pure UI component), state that explicitly: "No API call — renders props only."
+
 ## Boilerplate task (always first)
 
 The very first task must set up the project environment. Use order_index=0 and type=BACKEND.
@@ -55,7 +70,7 @@ If the project has frontend files, also add a frontend boilerplate task with ord
 
 - Cover every file listed in the directory structure.
 - name: Max 100 characters. Action-oriented verb phrase.
-- description: Must include the target file path, what to implement, key methods or endpoints, and acceptance criteria.
+- description: Must include the target file path, what to implement, API endpoint details (per the rules above), and acceptance criteria.
 - order_index: 0-based. The boilerplate task is always 0. Remaining tasks start from 1. Tasks with no dependencies get the lowest indexes. Tasks that depend on others get higher indexes. Frontend tasks always have higher indexes than the backend tasks they depend on.
 - type: `BACKEND` or `FRONTEND`.
 - Do not include speculative or optional tasks — only what is required to implement the MVP as defined in the analysis document.
@@ -81,33 +96,45 @@ If the project has frontend files, also add a frontend boilerplate task with ord
     },
     {
       "name": "Define User TypeORM entity",
-      "description": "File: src/user/user.entity.ts. Define User entity with columns: id (uuid PK), email (unique), passwordHash, name, createdAt, updatedAt. Add @Index on email. No methods — data class only.",
+      "description": "File: src/user/user.entity.ts. Define User entity with columns: id (uuid PK), email (unique), passwordHash, name, createdAt, updatedAt. Add @Index on email. No methods — data class only. No API call.",
       "type": "BACKEND",
       "order_index": 1
     },
     {
       "name": "Implement UserService CRUD",
-      "description": "File: src/user/user.service.ts. Implement findById(id), create(dto), update(id, dto), delete(id). findById throws NotFoundException if not found. create throws ConflictException if email duplicated. Depends on User entity and Repository injection.",
+      "description": "File: src/user/user.service.ts. Implement findById(id), create(dto), update(id, dto), delete(id). findById throws NotFoundException if not found. create throws ConflictException if email duplicated. Depends on User entity and Repository injection. No direct HTTP exposure — called by UserController.",
       "type": "BACKEND",
       "order_index": 2
     },
     {
       "name": "Implement UserController REST endpoints",
-      "description": "File: src/user/user.controller.ts. Implement GET /users/:id, POST /users, PATCH /users/:id, DELETE /users/:id. Use JwtAuthGuard on all routes. Delegate business logic to UserService.",
+      "description": "File: src/user/user.controller.ts. Implement the following endpoints per API Spec:\n- GET /users/:id → 200 { id, email, name, createdAt } | 404 if not found\n- POST /users → 201 { id, email, name } | 409 if email duplicated. Request: { email: string, password: string, name: string }\n- PATCH /users/:id → 200 { id, email, name } | 404. Request: { name?: string, password?: string }\n- DELETE /users/:id → 204 | 404\nUse JwtAuthGuard on all routes. Delegate business logic to UserService.",
       "type": "BACKEND",
       "order_index": 3
     },
     {
       "name": "Define CreateUserDto validation",
-      "description": "File: src/user/dto/create-user.dto.ts. Define DTO with: email (IsEmail), password (MinLength 8), name (IsString, IsNotEmpty). Use class-validator decorators.",
+      "description": "File: src/user/dto/create-user.dto.ts. Define DTO matching POST /users request body per API Spec: email (IsEmail), password (MinLength 8), name (IsString, IsNotEmpty). Use class-validator decorators.",
       "type": "BACKEND",
       "order_index": 3
     },
     {
       "name": "Wire UserModule",
-      "description": "File: src/user/user.module.ts. Import TypeOrmModule.forFeature([User]), provide UserService, declare UserController. Export UserService for use in other modules.",
+      "description": "File: src/user/user.module.ts. Import TypeOrmModule.forFeature([User]), provide UserService, declare UserController. Export UserService for use in other modules. No API call.",
       "type": "BACKEND",
       "order_index": 4
+    },
+    {
+      "name": "Implement LoginPage",
+      "description": "File: src/pages/LoginPage.tsx. Render a login form with email and password fields.\nAPI call: POST /auth/login with { email: string, password: string }.\nOn 200: receive { accessToken: string } — store in localStorage as 'accessToken', then redirect to /dashboard.\nOn 401: display inline error message '이메일 또는 비밀번호가 올바르지 않습니다'.\nNo other API calls.",
+      "type": "FRONTEND",
+      "order_index": 5
+    },
+    {
+      "name": "Implement UserProfilePage",
+      "description": "File: src/pages/UserProfilePage.tsx. Display the authenticated user's profile.\nAPI call: GET /users/:id with Authorization: Bearer <accessToken from localStorage>.\nOn 200: render { id, email, name, createdAt } fields.\nOn 401: redirect to /login.\nNo API call.",
+      "type": "FRONTEND",
+      "order_index": 6
     }
   ]
 }

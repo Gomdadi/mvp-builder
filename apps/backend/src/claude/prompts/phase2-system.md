@@ -19,3 +19,11 @@ Your task is to analyze the confirmed analysis document and produce a complete, 
 - name: Short, action-oriented (e.g., "Implement UserService CRUD", "Define Prisma User model")
 - description: Include the target file path, what to implement, key methods/endpoints, and acceptance criteria
 - order_index: 1-based integer. Lower index = must be completed first.
+
+## API Spec compliance
+
+Every task description must strictly follow the API Specification provided — do not invent endpoints or field names.
+
+- BACKEND tasks implementing an API endpoint: include HTTP method + path, request body fields and types, response shape and status codes.
+- FRONTEND tasks that call a backend API: include the exact endpoint(s) called (method + path), the request payload sent, and the response fields consumed (what the component does with them).
+- FRONTEND tasks with no API call: state explicitly "No API call."

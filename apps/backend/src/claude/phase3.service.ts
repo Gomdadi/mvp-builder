@@ -261,14 +261,21 @@ export class Phase3Service {
   ): Promise<void> {
     this.logger.log(`Phase 3 backend start — taskId=${taskId} name="${task.name}"`);
 
+    // 이전 task들이 생성한 구현 파일을 컨텍스트로 주입 — 실제 시그니처 기반 작성 유도
+    const priorCode = await this.loadPriorImplementations(projectId, doc.directoryStructure);
+
     const userContent = [
       '## Task',
       `Name: ${task.name}`,
       `Description: ${task.description}`,
       '',
+      priorCode ? `## Existing Implementations\n\n${priorCode}` : null,
+      '',
       '## Project Directory Structure',
       JSON.stringify(doc.directoryStructure, null, 2),
-    ].join('\n');
+    ]
+      .filter((line) => line !== null)
+      .join('\n');
 
     // test/impl 파일을 추적 — 두 파일 모두 생성되었는지 검증하기 위함
     let testFile: GeneratedFile | null = null;
@@ -314,10 +321,15 @@ export class Phase3Service {
   ): Promise<void> {
     this.logger.log(`Phase 3 frontend start — taskId=${taskId} name="${task.name}"`);
 
+    // 이전 task들이 생성한 구현 파일을 컨텍스트로 주입 — 실제 시그니처 기반 작성 유도
+    const priorCode = await this.loadPriorImplementations(projectId, doc.directoryStructure);
+
     const userContent = [
       '## Task',
       `Name: ${task.name}`,
       `Description: ${task.description}`,
+      '',
+      priorCode ? `## Existing Implementations\n\n${priorCode}` : null,
       '',
       doc.designSystem ? `## Design System\n${doc.designSystem}` : null,
       '',
@@ -358,6 +370,33 @@ export class Phase3Service {
     // sandbox 없이 바로 S3 업로드 — 종합 검증은 Phase 4가 담당
     await this.uploadAndComplete(projectId, taskId, [testFile, componentFile]);
     this.logger.log(`Phase 3 frontend complete — taskId=${taskId}`);
+  }
+
+  // S3에 이미 업로드된 이전 task들의 구현 파일을 읽어 컨텍스트 문자열로 반환.
+  // PipelineWorker가 orderIndex ASC로 task를 순차 처리하므로, 현재 시점에 S3에 있는 파일은
+  // 이전 task들이 생성한 파일이다. directoryStructure에 있는 파일만 포함해 테스트/환경 파일을
+  // 스택 무관하게 자동 제외한다 — directoryStructure는 구현 파일만 나열하도록 Phase 1에서 보장.
+  private async loadPriorImplementations(
+    projectId: string,
+    directoryStructure: Record<string, unknown>[],
+  ): Promise<string> {
+    const allFiles = await this.s3.listGeneratedFiles(projectId);
+
+    // directoryStructure에 있는 경로만 허용 — 테스트 파일·_env/ 환경 파일은 여기에 없으므로 자동 제외
+    const knownPaths = new Set(directoryStructure.map((e) => e.path as string));
+    const implFiles = allFiles.filter((f) => knownPaths.has(f));
+
+    if (implFiles.length === 0) return '';
+
+    // 병렬 다운로드 — 각 파일을 "// 경로\n코드" 형태로 표현
+    const entries = await Promise.all(
+      implFiles.map(async (filePath) => {
+        const code = await this.s3.downloadGeneratedFile(projectId, filePath);
+        return `// ${filePath}\n${code}`;
+      }),
+    );
+
+    return entries.join('\n\n---\n\n');
   }
 
   private async uploadAndComplete(

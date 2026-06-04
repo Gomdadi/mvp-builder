@@ -81,9 +81,8 @@ export class PipelineWorker extends WorkerHost {
         { id: pipelineRunId },
         { status: PipelineStatus.COMPLETED, completedAt: new Date() },
       );
-      // Phase 1 완료 통지 후 스트림 종료 (사용자 검토 대기 단계로 진입하므로 이번 run의 스트림은 마감)
+      // Phase 1 완료 통지 — 스트림은 유지 (confirm 후 Phase 2~4까지 동일 스트림으로 이어짐)
       await this.sseService.publish(projectId, this.event('phase_completed', { phase: PipelinePhase.PHASE_1 }));
-      await this.sseService.complete(projectId);
       this.logger.log(`Phase 1 complete — pipelineRunId=${pipelineRunId}`);
     } catch (e) {
       await this.pipelineRunRepo.update(
@@ -114,9 +113,8 @@ export class PipelineWorker extends WorkerHost {
         { id: pipelineRunId },
         { status: PipelineStatus.COMPLETED, completedAt: new Date() },
       );
-      // Phase 1 완료 통지 후 스트림 종료 (다시 사용자 검토 대기 단계로 진입)
+      // Phase 1 완료 통지 — 스트림은 유지
       await this.sseService.publish(projectId, this.event('phase_completed', { phase: PipelinePhase.PHASE_1 }));
-      await this.sseService.complete(projectId);
       this.logger.log(`Phase 1 (feedback) complete — pipelineRunId=${pipelineRunId}`);
     } catch (e) {
       await this.pipelineRunRepo.update(

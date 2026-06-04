@@ -87,7 +87,7 @@ export class Phase4Service {
   // S3에서 모든 생성 파일을 내려받아 FileMap을 구성하고, 종합 sandbox + debug loop를 실행한다.
   // 통과 시: debug loop 수정분을 S3에 반영하고 정상 return.
   // 실패 시: SANDBOX_MAX_RETRIES 소진 후 에러를 throw (PipelineWorker가 FAILED 처리).
-  async run(projectId: string): Promise<void> {
+  async run(projectId: string, claudeApiKey?: string): Promise<void> {
     const doc = await this.analysisDocumentRepo.findOneOrFail({
       where: { projectId, isConfirmed: true },
       order: { version: 'DESC' },
@@ -139,7 +139,7 @@ export class Phase4Service {
       if (attempt === SANDBOX_MAX_RETRIES - 1) break;
 
       // 마지막 시도가 아니면 debug loop 실행 — FileMap을 in-place 수정
-      await this.runDebugLoop(fileMap, result.output, doc.directoryStructure);
+      await this.runDebugLoop(fileMap, result.output, doc.directoryStructure, claudeApiKey);
     }
 
     throw new Error(
@@ -155,6 +155,7 @@ export class Phase4Service {
     fileMap: FileMap,
     errorOutput: string,
     directoryStructure: Record<string, unknown>[],
+    claudeApiKey?: string,
   ): Promise<void> {
     const userContent = [
       '## Test Failure Output',
@@ -178,6 +179,7 @@ export class Phase4Service {
       tools: [Phase4Service.TOOL_READ_FILES, Phase4Service.TOOL_IMPL],
       // read_files 3~4회 + generate_implementation_code 2~3회면 충분
       maxIterations: 8,
+      apiKey: claudeApiKey,
       onToolCall: (toolName, toolInput) => {
         if (toolName === 'read_files') {
           const { file_paths } = toolInput as { file_paths: string[] };

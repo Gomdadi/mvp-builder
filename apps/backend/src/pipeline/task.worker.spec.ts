@@ -7,8 +7,11 @@ import { PipelineRun } from '../entities/pipeline-run.entity';
 import { Task } from '../entities/task.entity';
 import { PipelineStatus, TaskStatus } from '../entities/enums';
 import { PIPELINE_QUEUE, PipelineJobName } from './pipeline.constants';
+import { SessionService } from '../session/session.service';
 
 const mockPhase3Service = { run: jest.fn() };
+// 기본 getSession → null (세션 없음, env 키 fallback)
+const mockSessionService = { getSession: jest.fn().mockResolvedValue(null) };
 const mockPipelineQueue = { add: jest.fn() };
 const mockPipelineRunRepo = { update: jest.fn() };
 const mockTaskRepo = { count: jest.fn() };
@@ -20,10 +23,12 @@ describe('TaskWorker', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockSessionService.getSession.mockResolvedValue(null);
     const module = await Test.createTestingModule({
       providers: [
         TaskWorker,
         { provide: Phase3Service, useValue: mockPhase3Service },
+        { provide: SessionService, useValue: mockSessionService },
         { provide: getQueueToken(PIPELINE_QUEUE), useValue: mockPipelineQueue },
         { provide: getRepositoryToken(PipelineRun), useValue: mockPipelineRunRepo },
         { provide: getRepositoryToken(Task), useValue: mockTaskRepo },
@@ -43,7 +48,8 @@ describe('TaskWorker', () => {
 
       await worker.process(makeJob(jobData) as any);
 
-      expect(mockPhase3Service.run).toHaveBeenCalledWith('p1', 't1');
+      // sessionId 없으므로 claudeApiKey는 undefined (env 키 fallback)
+      expect(mockPhase3Service.run).toHaveBeenCalledWith('p1', 't1', undefined);
       expect(mockPipelineRunRepo.update).not.toHaveBeenCalled();
     });
 
@@ -57,10 +63,10 @@ describe('TaskWorker', () => {
 
       await worker.process(makeJob(jobData) as any);
 
-      // COMPLETED 마크 대신 SANDBOX 잡 enqueue
+      // sessionId가 undefined일 때도 포함되어야 함
       expect(mockPipelineQueue.add).toHaveBeenCalledWith(
         PipelineJobName.SANDBOX,
-        { projectId: 'p1', pipelineRunId: 'run-1' },
+        { projectId: 'p1', pipelineRunId: 'run-1', sessionId: undefined },
       );
       expect(mockPipelineRunRepo.update).not.toHaveBeenCalled();
     });

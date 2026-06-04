@@ -8,9 +8,13 @@ import { Phase1Service } from '../claude/phase1.service';
 import { Phase2Service } from '../claude/phase2.service';
 import { Phase4Service } from '../claude/phase4.service';
 import { PipelineRun } from '../entities/pipeline-run.entity';
+import { Project } from '../entities/project.entity';
 import { Task } from '../entities/task.entity';
 import { PipelinePhase, PipelineStatus, TaskStatus } from '../entities/enums';
 import { PIPELINE_QUEUE, TASK_QUEUE, PipelineJobName, TaskJobName } from './pipeline.constants';
+import { SessionService } from '../session/session.service';
+import { GithubService } from '../github/github.service';
+import { S3Service } from '../s3/s3.service';
 
 // @Processor: 이 클래스가 PIPELINE_QUEUE의 잡을 소비하는 Worker임을 선언
 // BullMQ가 Redis 큐에서 잡을 꺼낼 때 process() 메서드를 자동으로 호출
@@ -23,9 +27,13 @@ export class PipelineWorker extends WorkerHost {
     private readonly phase1Service: Phase1Service,
     private readonly phase2Service: Phase2Service,
     private readonly phase4Service: Phase4Service,
+    private readonly sessionService: SessionService,
+    private readonly githubService: GithubService,
+    private readonly s3Service: S3Service,
     @InjectQueue(TASK_QUEUE) private readonly taskQueue: Queue,
     @InjectRepository(PipelineRun) private readonly pipelineRunRepo: Repository<PipelineRun>,
     @InjectRepository(Task) private readonly taskRepo: Repository<Task>,
+    @InjectRepository(Project) private readonly projectRepo: Repository<Project>,
   ) {
     super();
   }
@@ -54,9 +62,15 @@ export class PipelineWorker extends WorkerHost {
 
   // Phase 1 실행. 완료 시 PipelineRun.status=COMPLETED, 실패 시 FAILED
   private async handleStart(job: Job): Promise<void> {
-    const { projectId, pipelineRunId } = job.data as { projectId: string; pipelineRunId: string };
+    const { projectId, pipelineRunId, sessionId } = job.data as {
+      projectId: string;
+      pipelineRunId: string;
+      sessionId?: string;
+    };
     try {
-      await this.phase1Service.run(projectId);
+      // 세션에서 claudeApiKey를 꺼낸다. 없으면 env 키 fallback (ClaudeAgentService 내부 처리)
+      const session = await this.sessionService.getSession(sessionId ?? '');
+      await this.phase1Service.run(projectId, undefined, session?.claudeApiKey);
       await this.pipelineRunRepo.update(
         { id: pipelineRunId },
         { status: PipelineStatus.COMPLETED, completedAt: new Date() },
@@ -73,13 +87,15 @@ export class PipelineWorker extends WorkerHost {
 
   // Phase 1 재실행 (피드백 반영). feedbackText를 Phase1Service에 전달
   private async handleFeedback(job: Job): Promise<void> {
-    const { projectId, pipelineRunId, feedbackText } = job.data as {
+    const { projectId, pipelineRunId, feedbackText, sessionId } = job.data as {
       projectId: string;
       pipelineRunId: string;
       feedbackText: string;
+      sessionId?: string;
     };
     try {
-      await this.phase1Service.run(projectId, feedbackText);
+      const session = await this.sessionService.getSession(sessionId ?? '');
+      await this.phase1Service.run(projectId, feedbackText, session?.claudeApiKey);
       await this.pipelineRunRepo.update(
         { id: pipelineRunId },
         { status: PipelineStatus.COMPLETED, completedAt: new Date() },
@@ -98,13 +114,19 @@ export class PipelineWorker extends WorkerHost {
   // Phase 2는 BullMQ 재시도(stalled) 시 중복 Task 생성을 방지하기 위해 Task count > 0이면 skip.
   // Phase 3 실행 및 PipelineRun 완료 판정은 TaskWorker가 담당
   private async handleConfirm(job: Job): Promise<void> {
-    const { projectId, pipelineRunId } = job.data as { projectId: string; pipelineRunId: string };
+    const { projectId, pipelineRunId, sessionId } = job.data as {
+      projectId: string;
+      pipelineRunId: string;
+      sessionId?: string;
+    };
     try {
+      const session = await this.sessionService.getSession(sessionId ?? '');
+
       // BullMQ 재시도 시 Task count > 0이면 Phase 2 skip (idempotency)
       const existingCount = await this.taskRepo.count({ where: { pipelineRunId } });
       if (existingCount === 0) {
         await this.pipelineRunRepo.update({ id: pipelineRunId }, { phase: PipelinePhase.PHASE_2 });
-        await this.phase2Service.run(projectId, pipelineRunId);
+        await this.phase2Service.run(projectId, pipelineRunId, session?.claudeApiKey);
       }
 
       // DONE 제외한 Tasks를 orderIndex 오름차순으로 task 큐에 enqueue
@@ -116,7 +138,11 @@ export class PipelineWorker extends WorkerHost {
       });
 
       for (const task of tasks) {
-        await this.taskQueue.add(TaskJobName.RUN, { projectId, pipelineRunId, taskId: task.id }, { jobId: task.id });
+        await this.taskQueue.add(
+          TaskJobName.RUN,
+          { projectId, pipelineRunId, taskId: task.id, sessionId },
+          { jobId: task.id },
+        );
       }
 
       this.logger.log(`Phase 2 complete, ${tasks.length} tasks enqueued — pipelineRunId=${pipelineRunId}`);
@@ -130,13 +156,29 @@ export class PipelineWorker extends WorkerHost {
     }
   }
 
-  // Phase 4: 전체 생성 파일의 종합 sandbox 검증.
-  // TaskWorker가 모든 Task DONE 후 enqueue하며, 통과 시 PipelineRun COMPLETED 처리
+  // Phase 4: 전체 생성 파일의 종합 sandbox 검증 후 GitHub push.
+  // TaskWorker가 모든 Task DONE 후 enqueue하며, sandbox 통과 + GitHub push 성공 시 PipelineRun COMPLETED
   private async handleSandbox(job: Job): Promise<void> {
-    const { projectId, pipelineRunId } = job.data as { projectId: string; pipelineRunId: string };
+    const { projectId, pipelineRunId, sessionId } = job.data as {
+      projectId: string;
+      pipelineRunId: string;
+      sessionId?: string;
+    };
+
+    // 세션 조회는 try 외부 — finally에서 sessionId로 삭제해야 하므로
+    const session = await this.sessionService.getSession(sessionId ?? '');
+
     try {
       await this.pipelineRunRepo.update({ id: pipelineRunId }, { phase: PipelinePhase.PHASE_4 });
-      await this.phase4Service.run(projectId);
+      await this.phase4Service.run(projectId, session?.claudeApiKey);
+
+      // Phase 4 통과 후 GitHub repo 생성 + 생성 코드 push
+      if (session?.githubToken) {
+        await this.pushToGitHub(projectId, session.githubToken, session.isPrivate);
+      } else {
+        this.logger.warn(`No githubToken in session — skipping GitHub push for project ${projectId}`);
+      }
+
       await this.pipelineRunRepo.update(
         { id: pipelineRunId },
         { status: PipelineStatus.COMPLETED, completedAt: new Date() },
@@ -148,6 +190,39 @@ export class PipelineWorker extends WorkerHost {
         { status: PipelineStatus.FAILED, errorMessage: (e as Error).message },
       );
       throw e;
+    } finally {
+      // 성공/실패 무관하게 민감 정보(GitHub PAT, Claude API Key) 즉시 삭제
+      if (sessionId) {
+        await this.sessionService.deleteSession(sessionId);
+        this.logger.log(`Session deleted — sessionId=${sessionId}`);
+      }
     }
+  }
+
+  // S3의 생성 파일을 다운로드해 GitHub repo에 push하고 Project.githubRepoUrl을 업데이트한다.
+  private async pushToGitHub(projectId: string, githubToken: string, isPrivate: boolean): Promise<void> {
+    const project = await this.projectRepo.findOneOrFail({ where: { id: projectId } });
+
+    // Project.name을 GitHub repo 이름으로 변환 — kebab-case, 특수문자 제거
+    const repoName = project.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 100); // GitHub repo 이름 최대 100자 제한
+
+    // S3에서 전체 생성 파일 다운로드 (병렬)
+    const filePaths = await this.s3Service.listGeneratedFiles(projectId);
+    const files = await Promise.all(
+      filePaths.map(async (fp) => ({
+        path: fp,
+        content: await this.s3Service.downloadGeneratedFile(projectId, fp),
+      })),
+    );
+
+    const repoUrl = await this.githubService.pushFiles(githubToken, repoName, isPrivate, files);
+
+    // DB에 repo URL 저장 — 이후 사용자가 링크를 확인할 수 있도록
+    await this.projectRepo.update({ id: projectId }, { githubRepoUrl: repoUrl, githubRepoName: repoName });
+    this.logger.log(`GitHub repo URL saved — projectId=${projectId} url=${repoUrl}`);
   }
 }

@@ -7,16 +7,25 @@ import { Phase1Service } from '../claude/phase1.service';
 import { Phase2Service } from '../claude/phase2.service';
 import { Phase4Service } from '../claude/phase4.service';
 import { PipelineRun } from '../entities/pipeline-run.entity';
+import { Project } from '../entities/project.entity';
 import { Task } from '../entities/task.entity';
 import { PipelinePhase, PipelineStatus, TaskStatus } from '../entities/enums';
 import { PIPELINE_QUEUE } from './pipeline.constants';
+import { SessionService } from '../session/session.service';
+import { GithubService } from '../github/github.service';
+import { S3Service } from '../s3/s3.service';
 
 const mockPhase1Service = { run: jest.fn() };
 const mockPhase2Service = { run: jest.fn() };
 const mockPhase4Service = { run: jest.fn() };
+// 기본 getSession → null (세션 없음, env 키 fallback)
+const mockSessionService = { getSession: jest.fn().mockResolvedValue(null), deleteSession: jest.fn() };
+const mockGithubService = { pushFiles: jest.fn() };
+const mockS3Service = { listGeneratedFiles: jest.fn(), downloadGeneratedFile: jest.fn() };
 const mockTaskQueue = { add: jest.fn() };
 const mockPipelineRunRepo = { update: jest.fn() };
 const mockTaskRepo = { count: jest.fn(), find: jest.fn() };
+const mockProjectRepo = { findOneOrFail: jest.fn(), update: jest.fn() };
 
 const makeJob = (name: string, data: object) => ({ name, data });
 
@@ -25,15 +34,20 @@ describe('PipelineWorker', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockSessionService.getSession.mockResolvedValue(null);
     const module = await Test.createTestingModule({
       providers: [
         PipelineWorker,
         { provide: Phase1Service, useValue: mockPhase1Service },
         { provide: Phase2Service, useValue: mockPhase2Service },
         { provide: Phase4Service, useValue: mockPhase4Service },
+        { provide: SessionService, useValue: mockSessionService },
+        { provide: GithubService, useValue: mockGithubService },
+        { provide: S3Service, useValue: mockS3Service },
         { provide: getQueueToken(TASK_QUEUE), useValue: mockTaskQueue },
         { provide: getRepositoryToken(PipelineRun), useValue: mockPipelineRunRepo },
         { provide: getRepositoryToken(Task), useValue: mockTaskRepo },
+        { provide: getRepositoryToken(Project), useValue: mockProjectRepo },
       ],
     }).compile();
     worker = module.get(PipelineWorker);
@@ -47,7 +61,8 @@ describe('PipelineWorker', () => {
 
       await worker.process(job as any);
 
-      expect(mockPhase1Service.run).toHaveBeenCalledWith('p1');
+      // sessionId 없으므로 claudeApiKey는 undefined (env 키 fallback)
+      expect(mockPhase1Service.run).toHaveBeenCalledWith('p1', undefined, undefined);
       expect(mockPipelineRunRepo.update).toHaveBeenCalledWith(
         { id: 'run-1' },
         expect.objectContaining({ status: PipelineStatus.COMPLETED }),
@@ -77,7 +92,7 @@ describe('PipelineWorker', () => {
 
       await worker.process(job as any);
 
-      expect(mockPhase1Service.run).toHaveBeenCalledWith('p1', 'ERD 수정 필요');
+      expect(mockPhase1Service.run).toHaveBeenCalledWith('p1', 'ERD 수정 필요', undefined);
       expect(mockPipelineRunRepo.update).toHaveBeenCalledWith(
         { id: 'run-1' },
         expect.objectContaining({ status: PipelineStatus.COMPLETED }),
@@ -100,7 +115,7 @@ describe('PipelineWorker', () => {
 
       await worker.process(job as any);
 
-      expect(mockPhase2Service.run).toHaveBeenCalledWith('p1', 'run-1');
+      expect(mockPhase2Service.run).toHaveBeenCalledWith('p1', 'run-1', undefined);
       expect(mockPipelineRunRepo.update).toHaveBeenCalledWith(
         { id: 'run-1' },
         { phase: PipelinePhase.PHASE_3 },
@@ -115,7 +130,6 @@ describe('PipelineWorker', () => {
 
     it('Tasks가 이미 있으면 Phase2를 skip하고 DONE 제외 Tasks만 enqueue한다', async () => {
       mockTaskRepo.count.mockResolvedValueOnce(3); // existingCount > 0 → Phase 2 skip
-      // DONE 태스크 포함 목록 (find where Not(DONE))
       const nonDoneTasks = [{ id: 't2', status: TaskStatus.PENDING }];
       mockTaskRepo.find.mockResolvedValue(nonDoneTasks);
 
@@ -154,7 +168,10 @@ describe('PipelineWorker', () => {
         { id: 'run-1' },
         { phase: PipelinePhase.PHASE_4 },
       );
-      expect(mockPhase4Service.run).toHaveBeenCalledWith('p1');
+      // sessionId 없으므로 claudeApiKey는 undefined
+      expect(mockPhase4Service.run).toHaveBeenCalledWith('p1', undefined);
+      // githubToken 없으므로 GitHub push 미실행
+      expect(mockGithubService.pushFiles).not.toHaveBeenCalled();
       expect(mockPipelineRunRepo.update).toHaveBeenCalledWith(
         { id: 'run-1' },
         expect.objectContaining({ status: PipelineStatus.COMPLETED }),
@@ -169,6 +186,31 @@ describe('PipelineWorker', () => {
         { id: 'run-1' },
         expect.objectContaining({ status: PipelineStatus.FAILED }),
       );
+    });
+
+    it('세션에 githubToken이 있으면 GitHub push를 실행한다', async () => {
+      const fakeSession = { githubToken: 'ghp_xxx', claudeApiKey: 'sk-ant-xxx', isPrivate: false };
+      mockSessionService.getSession.mockResolvedValue(fakeSession);
+      mockPhase4Service.run.mockResolvedValue(undefined);
+      mockProjectRepo.findOneOrFail.mockResolvedValue({ id: 'p1', name: 'My App' });
+      mockS3Service.listGeneratedFiles.mockResolvedValue(['src/index.ts']);
+      mockS3Service.downloadGeneratedFile.mockResolvedValue('console.log("hi")');
+      mockGithubService.pushFiles.mockResolvedValue('https://github.com/user/my-app');
+
+      await worker.process(makeJob(PipelineJobName.SANDBOX, { projectId: 'p1', pipelineRunId: 'run-1', sessionId: 'sid-1' }) as any);
+
+      expect(mockGithubService.pushFiles).toHaveBeenCalledWith(
+        'ghp_xxx',
+        'my-app',
+        false,
+        [{ path: 'src/index.ts', content: 'console.log("hi")' }],
+      );
+      expect(mockProjectRepo.update).toHaveBeenCalledWith(
+        { id: 'p1' },
+        { githubRepoUrl: 'https://github.com/user/my-app', githubRepoName: 'my-app' },
+      );
+      // 세션 삭제 확인
+      expect(mockSessionService.deleteSession).toHaveBeenCalledWith('sid-1');
     });
   });
 });

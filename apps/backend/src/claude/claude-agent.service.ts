@@ -21,6 +21,8 @@ export interface AgentLoopOptions {
   maxTokens?: number;
   // 무한 루프 방지용 최대 API 호출 횟수. 기본값 10
   maxIterations?: number;
+  // 세션에서 가져온 Claude API Key — env의 CLAUDE_API_KEY 대신 이 키로 호출한다.
+  apiKey?: string;
 }
 
 // ClaudeAgentService가 받는 공통 옵션
@@ -51,21 +53,45 @@ export interface ClaudeCallOptions {
   toolName?: string;
   // Claude가 한 번에 생성할 수 있는 최대 토큰 수. 기본값 8192
   maxTokens?: number;
+  // 세션에서 가져온 Claude API Key — env의 CLAUDE_API_KEY 대신 이 키로 호출한다.
+  // 미지정 시 env 키 사용 (기존 동작 유지)
+  apiKey?: string;
 }
 
 @Injectable()
 export class ClaudeAgentService {
   private readonly logger = new Logger(ClaudeAgentService.name);
-  private readonly client: Anthropic;
+  // 기본 클라이언트 — env의 CLAUDE_API_KEY로 초기화. 세션 키가 없을 때 fallback으로 사용
+  private readonly client: Anthropic | null;
   private readonly model: string;
+  // 세션 키로 임시 클라이언트를 만들 때 재사용하는 설정값
+  private readonly timeout: number;
+  private readonly maxRetries: number;
+  private readonly defaultApiKey: string;
 
   constructor(config: ConfigService) {
-    const apiKey = config.getOrThrow<string>('CLAUDE_API_KEY');
-    const timeout = config.get<number>('CLAUDE_API_TIMEOUT', 120_000);
-    const maxRetries = config.get<number>('CLAUDE_API_MAX_RETRIES', 2);
+    // CLAUDE_API_KEY가 없어도 기동은 허용 — 세션 키를 통해 런타임에 주입 가능
+    this.defaultApiKey = config.get<string>('CLAUDE_API_KEY', '');
+    // ConfigService는 .env 값을 항상 문자열로 반환하므로 Number()로 명시적 변환
+    this.timeout = Number(config.get('CLAUDE_API_TIMEOUT', 120_000));
+    this.maxRetries = Number(config.get('CLAUDE_API_MAX_RETRIES', 2));
 
     this.model = config.get<string>('CLAUDE_MODEL', 'claude-sonnet-4-6');
-    this.client = new Anthropic({ apiKey, timeout, maxRetries });
+    // defaultApiKey가 있을 때만 기본 클라이언트 초기화 — 없으면 null(모든 호출에 세션 키 필수)
+    this.client = this.defaultApiKey
+      ? new Anthropic({ apiKey: this.defaultApiKey, timeout: this.timeout, maxRetries: this.maxRetries })
+      : null;
+  }
+
+  // 세션 키 또는 env 키로 Anthropic 클라이언트를 반환한다.
+  // apiKey가 주어지면 해당 키로 새 인스턴스를 생성(per-request)하고, 없으면 기본 클라이언트를 반환.
+  // 둘 다 없으면 에러 — 호출 전 세션 또는 env에 키가 설정되어 있어야 한다.
+  private getClient(apiKey?: string): Anthropic {
+    if (apiKey) {
+      return new Anthropic({ apiKey, timeout: this.timeout, maxRetries: this.maxRetries });
+    }
+    if (this.client) return this.client;
+    throw new Error('No Claude API key: provide via session (X-Session-Id) or CLAUDE_API_KEY env');
   }
 
   // Claude의 응답을 토큰 단위로 실시간 수신하는 AsyncGenerator.
@@ -85,7 +111,7 @@ export class ClaudeAgentService {
   //          호출부가 next()를 요청할 때마다 재개됨 (일반 함수처럼 한 번에 return하지 않음)
   async *stream(options: ClaudeCallOptions): AsyncGenerator<Anthropic.MessageStreamEvent> {
     const params = this.buildParams(options);
-    const messageStream = this.client.messages.stream(params as Anthropic.MessageStreamParams);
+    const messageStream = this.getClient(options.apiKey).messages.stream(params as Anthropic.MessageStreamParams);
     for await (const event of messageStream) {
       yield event;
     }
@@ -102,7 +128,7 @@ export class ClaudeAgentService {
   async runWithTool(options: ClaudeCallOptions): Promise<ToolResult> {
     const params = this.buildParams(options);
     // messages.create(): 비스트리밍 단건 요청. 응답 전체가 완성된 후 한 번에 반환
-    const response = await this.client.messages.create(
+    const response = await this.getClient(options.apiKey).messages.create(
       params as Anthropic.MessageCreateParamsNonStreaming,
     );
 
@@ -132,13 +158,15 @@ export class ClaudeAgentService {
   // tool_choice: 'auto' — Claude가 어떤 툴을 언제 호출할지 스스로 판단.
   // 시스템 프롬프트에서 호출 순서를 지시해야 올바른 순서 보장됨.
   async runAgentLoop(options: AgentLoopOptions): Promise<void> {
-    const { messages, system, tools, onToolCall, maxTokens = 8192, maxIterations = 10 } = options;
+    const { messages, system, tools, onToolCall, maxTokens = 8192, maxIterations = 10, apiKey } = options;
+    // 루프 전체에서 동일한 클라이언트 인스턴스를 재사용 — 반복마다 생성하지 않음
+    const client = this.getClient(apiKey);
 
     // 대화 히스토리 — 루프를 돌며 assistant 응답과 tool_result가 누적됨
     const history: Anthropic.MessageParam[] = [...messages];
 
     for (let i = 0; i < maxIterations; i++) {
-      const response = await this.client.messages.create({
+      const response = await client.messages.create({
         model: this.model,
         max_tokens: maxTokens, messages: history,
         // system이 있을 때만 { system: system }을 펼쳐 포함시킴.

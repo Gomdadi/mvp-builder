@@ -1,23 +1,16 @@
-import { Column, CreateDateColumn, Entity, Index, ManyToOne, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
-import { User } from './user.entity';
+import { Column, CreateDateColumn, Entity, Index, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
 import { AnalysisDocument } from './analysis-document.entity';
 import { PipelineRun } from './pipeline-run.entity';
 import { Task } from './task.entity';
 import { ProjectStatus } from './enums';
 
 @Entity('projects')
-// @Index: DB 인덱스 생성. Prisma의 @@index([userId]), @@index([status])에 대응
-@Index(['userId'])
+// @Index: DB 인덱스 생성. 인증 제거로 userId 인덱스는 삭제하고 status 인덱스만 유지
 @Index(['status'])
 export class Project {
   // !: TypeORM이 DB에서 값을 채워주므로 TypeScript의 strictPropertyInitialization 경고를 억제
   @PrimaryGeneratedColumn('uuid')
   id!: string;
-
-  // @Column({ name: 'user_id' }): 외래키 컬럼 이름을 명시
-  // @ManyToOne과 쌍으로 작동 — user_id 컬럼이 users.id를 참조
-  @Column({ name: 'user_id', type: 'uuid' })
-  userId!: string;
 
   @Column({ length: 200 })
   name!: string;
@@ -37,10 +30,10 @@ export class Project {
   @Column({ type: 'enum', enum: ProjectStatus, default: ProjectStatus.CREATED })
   status!: ProjectStatus;
 
-  @Column({ name: 'github_repo_url', nullable: true })
+  @Column({ name: 'github_repo_url', type: 'text', nullable: true })
   githubRepoUrl!: string | null;
 
-  @Column({ name: 'github_repo_name', length: 200, nullable: true })
+  @Column({ name: 'github_repo_name', type: 'varchar', length: 200, nullable: true })
   githubRepoName!: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
@@ -48,10 +41,6 @@ export class Project {
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
   updatedAt!: Date;
-
-  // @ManyToOne: 여러 Project가 User 1명에 속함
-  @ManyToOne(() => User, (user) => user.projects)
-  user!: User;
 
   @OneToMany(() => AnalysisDocument, (doc) => doc.project)
   analysisDocuments!: AnalysisDocument[];

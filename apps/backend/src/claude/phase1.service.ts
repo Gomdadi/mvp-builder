@@ -121,7 +121,7 @@ export class Phase1Service {
   // 에이전트 루프로 4개 툴을 순서대로 호출해 ERD → API spec → Architecture → Directory 생성 후 DB 저장.
   // userFeedback: 이전 Phase 1 결과에 대한 수정 요청 — 있으면 새 버전으로 재생성
   // 반환값: 생성된 AnalysisDocument의 id
-  async run(projectId: string, userFeedback?: string): Promise<string> {
+  async run(projectId: string, userFeedback?: string, claudeApiKey?: string): Promise<string> {
     // findOneOrFail: 없으면 EntityNotFoundError 발생 (Prisma의 findUniqueOrThrow와 동일)
     const project = await this.projectRepo.findOneOrFail({ where: { id: projectId } });
 
@@ -150,6 +150,7 @@ export class Phase1Service {
       system: this.systemPrompt,
       messages: [{ role: 'user', content: userContent }],
       tools: Phase1Service.TOOLS,
+      apiKey: claudeApiKey,
       // onToolCall: Claude가 툴을 호출할 때마다 실행되는 콜백.
       // toolInput에서 결과를 꺼내 result에 저장하고,
       // 반환한 문자열이 tool_result로 Claude에게 전달되어 다음 툴 호출의 맥락이 됨

@@ -11,6 +11,9 @@ import { AnalysisDocument } from '../entities/analysis-document.entity';
 import { PipelineRun } from '../entities/pipeline-run.entity';
 import { Task } from '../entities/task.entity';
 import { ClaudeModule } from '../claude/claude.module';
+import { SessionModule } from '../session/session.module';
+import { GithubModule } from '../github/github.module';
+import { S3Module } from '../s3/s3.module';
 
 // defaultJobOptions 공통 옵션 — PIPELINE_QUEUE, TASK_QUEUE 둘 다 동일하게 적용
 const DEFAULT_JOB_OPTIONS = {
@@ -22,7 +25,10 @@ const DEFAULT_JOB_OPTIONS = {
 
 @Module({
   imports: [
-    ClaudeModule, // Phase1/2/3Service 제공
+    ClaudeModule,    // Phase1/2/3Service 제공
+    SessionModule,   // SessionService — Worker가 Redis에서 apiKey/githubToken 조회
+    GithubModule,    // GithubService — Phase 4 완료 후 repo 생성 + push
+    S3Module,        // S3Service — GitHub push 시 생성 파일 다운로드
 
     // BullModule.registerQueue: 이 모듈에서 사용할 큐를 등록
     BullModule.registerQueue(

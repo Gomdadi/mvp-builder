@@ -82,7 +82,7 @@ export class Phase2Service {
   // Phase 2 실행.
   // isConfirmed=true인 최신 분석 문서를 기반으로 태스크 목록을 생성하고 DB에 일괄 저장.
   // pipelineRunId: 생성된 태스크와 파이프라인 실행을 연결하는 외래키
-  async run(projectId: string, pipelineRunId: string): Promise<void> {
+  async run(projectId: string, pipelineRunId: string, claudeApiKey?: string): Promise<void> {
     // isConfirmed=true인 가장 최신 버전의 분석 문서 조회.
     // 사용자가 Phase 1 결과를 확정(confirm)해야 Phase 2를 실행할 수 있음
     // order: { version: 'DESC' } — Prisma의 orderBy: { version: 'desc' }에 대응
@@ -119,6 +119,7 @@ export class Phase2Service {
       // toolName 지정 → tool_choice: { type: 'tool', name: 'generate_tasks' }
       // 반드시 이 툴만 호출하도록 강제
       toolName: Phase2Service.TOOL.name,
+      apiKey: claudeApiKey,
     });
 
     const input = toolInput as TaskListInput;

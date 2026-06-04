@@ -20,11 +20,12 @@ describe('ClaudeAgentService', () => {
   let mockStream: jest.Mock;
 
   // ConfigService mock — 실제 .env 파일 없이 테스트 가능하도록
-  // getOrThrow: CLAUDE_API_KEY 요청 시 'test-api-key' 반환
-  // get: 나머지 설정값(timeout, maxRetries 등)은 fallback 기본값 그대로 반환
+  // CLAUDE_API_KEY는 'test-api-key' 반환, 나머지는 fallback 기본값 그대로 반환
   const mockConfig = {
-    getOrThrow: jest.fn().mockReturnValue('test-api-key'),
-    get: jest.fn().mockImplementation((key: string, fallback: unknown) => fallback),
+    get: jest.fn().mockImplementation((key: string, fallback: unknown) => {
+      if (key === 'CLAUDE_API_KEY') return 'test-api-key';
+      return fallback;
+    }),
   };
 
   beforeEach(async () => {

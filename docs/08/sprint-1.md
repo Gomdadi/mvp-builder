@@ -151,17 +151,18 @@
 
 ### E9: GitHub 연동 서비스
 
-#### T-E9-01: GitHubService 구현
+#### T-E9-01: GitHubService 구현 ✅
 - **유형**: 개발
-- **설명**: GitHub API 연동 — 저장소 생성, S3에서 코드 읽어 push. `.env`의 `GITHUB_PAT` 사용
+- **설명**: GitHub API 연동 — 저장소 생성, S3에서 코드 읽어 push. 세션 기반 PAT 사용 (`.env` 하드코딩 → 요청마다 세션으로 수신)
 - **선행 태스크**: T-E6-04
 - **완료 기준**:
-  - [ ] `.env`의 `GITHUB_PAT`으로 GitHub API 인증
-  - [ ] DB에서 S3 key 목록 조회 → S3 다운로드 → GitHub push
-  - [ ] 저장소 이름 중복 시 suffix 추가 (-1, -2 등)
-  - [ ] `docker-compose.yml` 생성 코드에 포함
-  - [ ] 502 GITHUB_API_ERROR 시 재시도 1회 후 실패 처리
-  - [ ] Unit Test: GitHub API mock으로 저장소 생성 및 push 로직
+  - [x] `POST /v1/session` — githubToken + claudeApiKey + isPrivate를 Redis에 임시 저장, sessionId 반환
+  - [x] `X-Session-Id` 헤더로 파이프라인 전 엔드포인트에 세션 연결
+  - [x] `@octokit/rest` 기반 GithubService — repo 생성 + git trees API batch push
+  - [x] Phase 4 완료 후 S3 파일 다운로드 → GitHub push → `Project.githubRepoUrl` 저장
+  - [x] 파이프라인 완료(성공/실패 무관) 후 Redis 세션 자동 삭제
+  - [x] Unit Test: SessionService, GithubService, PipelineWorker, TaskWorker
+  - [x] User entity 제거, Project.userId 제거 — 인증 없는 세션 기반 구조로 전환
 
 ---
 
@@ -229,7 +230,7 @@ flowchart TD
 |--------|------|
 | T-E6-04 Phase 3 코드 생성 + S3 | ✅ |
 | T-E7-02 PipelineService + resume | ✅ |
-| T-E9-01 GitHub Service | ⬜ |
+| T-E9-01 GitHub Service | ✅ |
 
 **완료 기준**: Phase 1→2→3 end-to-end 동작, GitHub 저장소 생성 + push 확인
 

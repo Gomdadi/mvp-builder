@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
+import { Body, Controller, Headers, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
 import { PipelineService } from './pipeline.service';
 
 // @Controller('pipeline'): 이 클래스의 모든 라우트는 /v1/pipeline으로 시작 (global prefix v1 포함)
@@ -12,9 +12,12 @@ export class PipelineController {
   @Post(':projectId/start')
   // @HttpCode: 기본 응답 코드(200)를 202로 변경. 잡을 등록만 하고 처리는 비동기로 진행됨을 의미
   @HttpCode(HttpStatus.ACCEPTED)
-  // @Param('projectId'): URL의 :projectId 값을 projectId 변수로 추출
-  start(@Param('projectId') projectId: string) {
-    return this.pipelineService.start(projectId);
+  // @Headers('x-session-id'): POST /v1/session에서 발급된 sessionId — Worker가 Redis에서 키를 조회하는 데 사용
+  start(
+    @Param('projectId') projectId: string,
+    @Headers('x-session-id') sessionId: string,
+  ) {
+    return this.pipelineService.start(projectId, sessionId);
   }
 
   // 분석 문서 확정 → Phase 2/3 실행
@@ -22,9 +25,10 @@ export class PipelineController {
   @HttpCode(HttpStatus.ACCEPTED)
   confirm(
     @Param('projectId') projectId: string,
+    @Headers('x-session-id') sessionId: string,
     @Body() body: { analysisDocumentId: string },
   ) {
-    return this.pipelineService.confirm(projectId, body.analysisDocumentId);
+    return this.pipelineService.confirm(projectId, body.analysisDocumentId, sessionId);
   }
 
   // 피드백 제출 → Phase 1 재실행
@@ -32,8 +36,9 @@ export class PipelineController {
   @HttpCode(HttpStatus.ACCEPTED)
   feedback(
     @Param('projectId') projectId: string,
+    @Headers('x-session-id') sessionId: string,
     @Body() body: { analysisDocumentId: string; feedbackText: string },
   ) {
-    return this.pipelineService.feedback(projectId, body.analysisDocumentId, body.feedbackText);
+    return this.pipelineService.feedback(projectId, body.analysisDocumentId, body.feedbackText, sessionId);
   }
 }

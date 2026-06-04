@@ -131,7 +131,7 @@ export class Phase3Service {
     this.frontendBoilerplateSystemPrompt = Phase3Service.loadPrompt('phase3-boilerplate-frontend-system.md');
   }
 
-  async run(projectId: string, taskId: string): Promise<void> {
+  async run(projectId: string, taskId: string, claudeApiKey?: string): Promise<void> {
     const task = await this.taskRepo.findOneOrFail({ where: { id: taskId } });
 
     const doc = await this.analysisDocumentRepo.findOne({
@@ -148,13 +148,13 @@ export class Phase3Service {
     try {
       // orderIndex=0: 보일러플레이트 태스크 — type에 따라 백엔드/프론트엔드 기반 파일 생성을 분기
       if (task.orderIndex === 0 && task.type === TaskType.BACKEND) {
-        await this.runBackendBoilerplate(task, doc, projectId, taskId);
+        await this.runBackendBoilerplate(task, doc, projectId, taskId, claudeApiKey);
       } else if (task.orderIndex === 0 && task.type === TaskType.FRONTEND) {
-        await this.runFrontendBoilerplate(task, doc, projectId, taskId);
+        await this.runFrontendBoilerplate(task, doc, projectId, taskId, claudeApiKey);
       } else if (task.type === TaskType.FRONTEND) {
-        await this.runFrontend(task, doc, projectId, taskId);
+        await this.runFrontend(task, doc, projectId, taskId, claudeApiKey);
       } else {
-        await this.runBackend(task, doc, projectId, taskId);
+        await this.runBackend(task, doc, projectId, taskId, claudeApiKey);
       }
     } catch (e) {
       await this.taskRepo.update({ id: taskId }, { status: TaskStatus.FAILED });
@@ -169,6 +169,7 @@ export class Phase3Service {
     doc: { directoryStructure: Record<string, unknown>[] },
     projectId: string,
     taskId: string,
+    claudeApiKey?: string,
   ): Promise<void> {
     this.logger.log(`Phase 3 backend boilerplate start — taskId=${taskId}`);
 
@@ -188,6 +189,7 @@ export class Phase3Service {
       messages: [{ role: 'user', content: userContent }],
       // TOOL_BACKEND_IMPL만 허용 — _env/ 하위 환경 파일만 생성
       tools: [Phase3Service.TOOL_BACKEND_IMPL],
+      apiKey: claudeApiKey,
       onToolCall: (toolName, toolInput) => {
         if (toolName === 'generate_backend_implementation_code') {
           const input = toolInput as { file_path: string; code: string };
@@ -215,6 +217,7 @@ export class Phase3Service {
     doc: { directoryStructure: Record<string, unknown>[] },
     projectId: string,
     taskId: string,
+    claudeApiKey?: string,
   ): Promise<void> {
     this.logger.log(`Phase 3 frontend boilerplate start — taskId=${taskId}`);
 
@@ -234,6 +237,7 @@ export class Phase3Service {
       messages: [{ role: 'user', content: userContent }],
       // TOOL_FRONTEND_IMPL만 허용 — 프론트엔드 기반 파일만 생성
       tools: [Phase3Service.TOOL_FRONTEND_IMPL],
+      apiKey: claudeApiKey,
       onToolCall: (toolName, toolInput) => {
         if (toolName === 'generate_frontend_implementation_code') {
           const input = toolInput as { file_path: string; code: string };
@@ -258,6 +262,7 @@ export class Phase3Service {
     doc: { directoryStructure: Record<string, unknown>[] },
     projectId: string,
     taskId: string,
+    claudeApiKey?: string,
   ): Promise<void> {
     this.logger.log(`Phase 3 backend start — taskId=${taskId} name="${task.name}"`);
 
@@ -285,6 +290,7 @@ export class Phase3Service {
       system: this.backendSystemPrompt,
       messages: [{ role: 'user', content: userContent }],
       tools: Phase3Service.BACKEND_TOOLS,
+      apiKey: claudeApiKey,
       onToolCall: (toolName, toolInput) => {
         if (toolName === 'generate_backend_test_code') {
           const input = toolInput as { test_path: string; test_code: string };
@@ -318,6 +324,7 @@ export class Phase3Service {
     doc: { directoryStructure: Record<string, unknown>[]; designSystem: string | null },
     projectId: string,
     taskId: string,
+    claudeApiKey?: string,
   ): Promise<void> {
     this.logger.log(`Phase 3 frontend start — taskId=${taskId} name="${task.name}"`);
 
@@ -347,6 +354,7 @@ export class Phase3Service {
       system: this.frontendSystemPrompt,
       messages: [{ role: 'user', content: userContent }],
       tools: Phase3Service.FRONTEND_TOOLS,
+      apiKey: claudeApiKey,
       onToolCall: (toolName, toolInput) => {
         if (toolName === 'generate_frontend_test_code') {
           const input = toolInput as { test_path: string; test_code: string };

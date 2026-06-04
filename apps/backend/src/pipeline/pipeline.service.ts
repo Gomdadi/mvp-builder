@@ -21,7 +21,9 @@ export class PipelineService {
     @InjectRepository(AnalysisDocument) private readonly analysisDocumentRepo: Repository<AnalysisDocument>,
   ) {}
 
-  async start(projectId: string) {
+  // sessionId: POST /v1/session에서 발급한 세션 식별자.
+  // Worker가 Redis에서 claudeApiKey/githubToken을 조회하는 데 사용된다.
+  async start(projectId: string, sessionId?: string) {
     // findOne: 조건에 맞는 단건 조회. 없으면 null 반환 (Prisma의 findUnique와 동일)
     const project = await this.projectRepo.findOne({ where: { id: projectId } });
     if (!project) {
@@ -53,6 +55,7 @@ export class PipelineService {
       projectId,
       pipelineRunId: pipelineRun.id,
       phase: PipelinePhase.PHASE_1,
+      sessionId, // Worker가 Redis에서 claudeApiKey를 꺼낼 때 사용
     });
 
     return { pipelineId: pipelineRun.id, phase: pipelineRun.phase, status: pipelineRun.status };
@@ -60,7 +63,7 @@ export class PipelineService {
 
   // 분석 문서 확정 → Phase 2/3 실행 잡 등록.
   // analysisDocumentId: 사용자가 확정할 분석 문서 (여러 버전 중 하나를 선택 가능)
-  async confirm(projectId: string, analysisDocumentId: string) {
+  async confirm(projectId: string, analysisDocumentId: string, sessionId?: string) {
     const project = await this.projectRepo.findOne({ where: { id: projectId } });
     if (!project) {
       throw new NotFoundException('NOT_FOUND');
@@ -87,6 +90,7 @@ export class PipelineService {
     await this.pipelineQueue.add(PipelineJobName.CONFIRM, {
       projectId,
       pipelineRunId: pipelineRun.id,
+      sessionId, // Worker가 Redis에서 claudeApiKey를 꺼낼 때 사용
     });
 
     return { pipelineId: pipelineRun.id, phase: pipelineRun.phase, status: pipelineRun.status };
@@ -94,7 +98,7 @@ export class PipelineService {
 
   // 피드백 제출 → Phase 1 재실행 잡 등록.
   // feedbackText: 이전 분석 문서에 대한 수정 요청 — Phase1Service.run()에 전달됨
-  async feedback(projectId: string, analysisDocumentId: string, feedbackText: string) {
+  async feedback(projectId: string, analysisDocumentId: string, feedbackText: string, sessionId?: string) {
     const project = await this.projectRepo.findOne({ where: { id: projectId } });
     if (!project) {
       throw new NotFoundException('NOT_FOUND');
@@ -122,6 +126,7 @@ export class PipelineService {
       projectId,
       pipelineRunId: pipelineRun.id,
       feedbackText,
+      sessionId, // Worker가 Redis에서 claudeApiKey를 꺼낼 때 사용
     });
 
     return { pipelineId: pipelineRun.id, phase: pipelineRun.phase, status: pipelineRun.status };

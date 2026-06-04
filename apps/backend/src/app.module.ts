@@ -4,7 +4,8 @@ import { BullModule } from '@nestjs/bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { PipelineModule } from './pipeline/pipeline.module';
-import { User } from './entities/user.entity';
+import { SessionModule } from './session/session.module';
+import { GithubModule } from './github/github.module';
 import { Project } from './entities/project.entity';
 import { AnalysisDocument } from './entities/analysis-document.entity';
 import { PipelineRun } from './entities/pipeline-run.entity';
@@ -23,9 +24,9 @@ import { Task } from './entities/task.entity';
         type: 'postgres',
         // DATABASE_URL: postgresql://user:pass@host:port/dbname 형태의 연결 문자열
         url: config.getOrThrow<string>('DATABASE_URL'),
-        entities: [User, Project, AnalysisDocument, PipelineRun, Task],
-        // synchronize: false — 프로덕션에서 자동 스키마 변경 금지. 마이그레이션으로 스키마 관리
-        synchronize: false,
+        entities: [Project, AnalysisDocument, PipelineRun, Task],
+        // synchronize: true — 엔티티 변경 시 DB 스키마 자동 동기화 (개발 환경 전용)
+        synchronize: true,
       }),
     }),
 
@@ -41,6 +42,8 @@ import { Task } from './entities/task.entity';
     }),
 
     PipelineModule,
+    SessionModule, // POST /v1/session — GitHub PAT + Claude API Key를 Redis에 임시 저장
+    GithubModule, // Phase 4 완료 후 생성 코드를 GitHub repo에 push
   ],
   controllers: [AppController],
 })

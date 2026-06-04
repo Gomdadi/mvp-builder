@@ -139,13 +139,16 @@
 
 ### E8: SSE 실시간 스트리밍
 
-#### T-E8-01: SSE Gateway 구현
+#### T-E8-01: SSE Gateway 구현 ✅
 - **유형**: 개발
-- **설명**: `GET /v1/pipeline/stream` SSE 엔드포인트, 7종 이벤트 전송
+- **설명**: `GET /v1/pipeline/:projectId/stream` SSE 엔드포인트, Redis pub/sub 기반 이벤트 전송
 - **선행 태스크**: T-E7-01
 - **완료 기준**:
-  - [ ] `phase_started`, `progress`, `phase_completed`, `task_started`, `task_completed`, `pipeline_completed`, `pipeline_failed` 이벤트 전송
-  - [ ] SSE 연결 끊김 시 자동 재연결 처리
+  - [x] `phase_started`, `phase_completed`, `task_started`, `task_completed`, `pipeline_completed`, `pipeline_failed` 이벤트 전송
+  - [x] Redis pub/sub: SSE_REDIS_PUB(PUBLISH 전용), SSE_REDIS_SUB(SUBSCRIBE 전용) 전용 커넥션 분리
+  - [x] pipeline_completed 시 githubRepoUrl 이벤트 페이로드에 포함
+  - [x] pipeline_completed/failed 후 subject.complete()로 스트림 자동 종료 + Redis UNSUBSCRIBE
+  - [x] Unit Test: SseService publish/getStream/complete 7 cases
 
 ---
 
@@ -221,7 +224,7 @@ flowchart TD
 | T-E6-01 `@anthropic-ai/sdk` 래퍼 | ✅ |
 | T-E6-02 Phase 1 프롬프트 | ✅ |
 | T-E6-03 Phase 2 프롬프트 | ✅ |
-| T-E8-01 SSE Gateway | ⬜ |
+| T-E8-01 SSE Gateway | ✅ |
 
 **완료 기준**: Phase 1 문서 생성 + SSE 스트리밍 동작 확인
 

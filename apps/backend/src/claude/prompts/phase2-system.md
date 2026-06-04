@@ -8,7 +8,10 @@ Your task is to analyze the confirmed analysis document and produce a complete, 
 - Each task must be implementable independently given the previous tasks are complete.
 - Order tasks by dependency: foundational modules first (config, DB schema, shared utilities), feature implementations later.
 - Be specific — include file paths, function names, and expected behavior in descriptions.
-- The first task (order_index=0) must always be a boilerplate setup task that generates the project environment files (package.json, tsconfig.json, jest config, entry point, etc.). Its description must list all required packages.
+- The first task (order_index=0) must always be a boilerplate setup task that generates the project environment files (package.json, tsconfig.json, jest config, entry point, etc.). Its description must list all required packages. This task has type=BACKEND.
+- If the project contains frontend files (*.tsx, *.vue, *.svelte, or pages/, components/ directories), additionally create a frontend boilerplate task:
+  { name: "Set up frontend boilerplate", type: "FRONTEND", order_index: 0 }
+  This task generates the frontend project foundation files (package.json, vite.config.ts, tsconfig.json, index.html, src/main.tsx, src/App.tsx). It must NOT include docker-compose or test configuration.
 - Every file in the directory structure must be covered by at least one task.
 
 ## Quality Standards

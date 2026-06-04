@@ -41,6 +41,16 @@ Example:
 }
 ```
 
+If the project has frontend files, also add a frontend boilerplate task with order_index=0 and type=FRONTEND:
+```json
+{
+  "name": "Set up frontend boilerplate",
+  "description": "Generate frontend project foundation files: package.json (react, react-dom, typescript, vite, @vitejs/plugin-react), vite.config.ts (path aliases from directory structure), tsconfig.json (jsx: react-jsx, strict), index.html, src/main.tsx, src/App.tsx. No test config or docker-compose needed.",
+  "type": "FRONTEND",
+  "order_index": 0
+}
+```
+
 ## Output requirements
 
 - Cover every file listed in the directory structure.
@@ -61,6 +71,12 @@ Example:
       "name": "Set up project boilerplate",
       "description": "Generate project environment files: docker-compose.yml (node:20-alpine, npm ci && jest), package.json (@nestjs/common, @nestjs/core, typeorm, pg, jest, ts-jest), tsconfig.json, jest.config.js, src/app.module.ts, src/main.ts. Required packages: @nestjs/common ^10, @nestjs/core ^10, @nestjs/platform-express ^10, @nestjs/typeorm ^10, typeorm ^0.3, pg ^8, reflect-metadata ^0.2, rxjs ^7",
       "type": "BACKEND",
+      "order_index": 0
+    },
+    {
+      "name": "Set up frontend boilerplate",
+      "description": "Generate frontend project foundation files: package.json (react, react-dom, typescript, vite, @vitejs/plugin-react), vite.config.ts (path aliases from directory structure), tsconfig.json (jsx: react-jsx, strict), index.html, src/main.tsx, src/App.tsx. No test config or docker-compose needed.",
+      "type": "FRONTEND",
       "order_index": 0
     },
     {

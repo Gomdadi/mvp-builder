@@ -4,9 +4,9 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Phase3Service } from './phase3.service';
 import { ClaudeAgentService } from './claude-agent.service';
 import { S3Service } from '../s3/s3.service';
-import { DockerSandboxService } from '../docker/docker-sandbox.service';
 import { Task } from '../entities/task.entity';
 import { AnalysisDocument } from '../entities/analysis-document.entity';
+import { TaskType } from '../entities/enums';
 
 // fs 모듈 전체를 mock — Phase3Service의 static 필드(TOOL)와 생성자에서 MD 파일을 읽는데,
 // 테스트 환경에서는 실제 파일이 없을 수 있으므로 가짜 문자열을 반환하도록 교체
@@ -15,21 +15,17 @@ const mockReadFileSync = fs.readFileSync as jest.Mock;
 // static 필드(TOOL_TEST, TOOL_IMPL) 초기화 시점에도 호출되므로 모듈 로드 직후 기본값 설정
 mockReadFileSync.mockReturnValue('mocked prompt');
 
-// ClaudeAgentService mock — backend: runAgentLoop, frontend/retry: runWithTool
+// ClaudeAgentService mock — backend: runAgentLoop, frontend: runWithTool
 const mockClaudeAgent = { runAgentLoop: jest.fn(), runWithTool: jest.fn() };
 
 // TypeORM Repository mock
 const mockTaskRepo = { findOneOrFail: jest.fn(), update: jest.fn() };
 const mockAnalysisDocumentRepo = { findOne: jest.fn() };
 
-// S3Service mock — uploadGeneratedFile, downloadGeneratedFile 모두 필요
+// S3Service mock — uploadGeneratedFile만 사용 (Phase3는 sandbox 없음)
 const mockS3Service = {
   uploadGeneratedFile: jest.fn(),
-  downloadGeneratedFile: jest.fn(),
 };
-
-// DockerSandboxService mock — runTest만 사용
-const mockDockerSandbox = { runTest: jest.fn() };
 
 // ── 테스트 픽스처 ─────────────────────────────────────────────────────────────
 
@@ -42,12 +38,21 @@ const fakeTask = {
   orderIndex: 1,
 };
 
-// 보일러플레이트 태스크 (orderIndex=0)
+// 백엔드 보일러플레이트 태스크 (orderIndex=0, type=BACKEND)
 const fakeBoilerplateTask = {
   id: 'task-0',
   name: 'Set up project boilerplate',
   description: 'Generate package.json, tsconfig.json, jest.config.js',
-  type: 'BACKEND' as const,
+  type: TaskType.BACKEND,
+  orderIndex: 0,
+};
+
+// 프론트엔드 보일러플레이트 태스크 (orderIndex=0, type=FRONTEND)
+const fakeFrontendBoilerplateTask = {
+  id: 'task-fe-bp',
+  name: 'Set up frontend boilerplate',
+  description: 'Generate frontend project files',
+  type: TaskType.FRONTEND,
   orderIndex: 0,
 };
 
@@ -95,25 +100,12 @@ const confirmedDocWithDesignSystem = {
   designSystem: '## Design System\n### Colors\n- Primary: #6366F1',
 };
 
-// impl 재생성 runWithTool 반환값
-const implRetryResult = {
-  toolName: 'generate_implementation_code',
-  toolInput: {
-    file_path: 'src/user/user.service.ts',
-    code: 'export class UserService { /* fixed */ }',
-  },
-};
-
 describe('Phase3Service', () => {
   let service: Phase3Service;
 
   beforeEach(async () => {
     jest.clearAllMocks();
     mockReadFileSync.mockReturnValue('mocked prompt');
-
-    // env 파일 다운로드는 기본적으로 빈 배열 (파일 없음)으로 처리
-    // 각 테스트에서 필요 시 개별 override
-    mockS3Service.downloadGeneratedFile.mockRejectedValue(new Error('Not found'));
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -122,7 +114,6 @@ describe('Phase3Service', () => {
         { provide: getRepositoryToken(Task), useValue: mockTaskRepo },
         { provide: getRepositoryToken(AnalysisDocument), useValue: mockAnalysisDocumentRepo },
         { provide: S3Service, useValue: mockS3Service },
-        { provide: DockerSandboxService, useValue: mockDockerSandbox },
       ],
     }).compile();
 
@@ -152,8 +143,6 @@ describe('Phase3Service', () => {
 
       await service.run('proj-1', 'task-0');
 
-      // 보일러플레이트는 DockerSandboxService를 사용하지 않음
-      expect(mockDockerSandbox.runTest).not.toHaveBeenCalled();
       expect(mockS3Service.uploadGeneratedFile).toHaveBeenCalledTimes(2);
       expect(mockS3Service.uploadGeneratedFile).toHaveBeenCalledWith('proj-1', '_env/package.json', '{"name":"test"}');
       expect(mockTaskRepo.update).toHaveBeenNthCalledWith(2, { id: 'task-0' }, { status: 'DONE' });
@@ -170,77 +159,69 @@ describe('Phase3Service', () => {
       expect(mockTaskRepo.update).toHaveBeenNthCalledWith(2, { id: 'task-0' }, { status: 'FAILED' });
     });
 
+    // ── 프론트엔드 보일러플레이트 ─────────────────────────────────────────────────
+
+    it('[frontend boilerplate] orderIndex=0 FRONTEND이면 프론트엔드 기반 파일을 생성하고 DONE으로 갱신한다', async () => {
+      mockTaskRepo.findOneOrFail.mockResolvedValue(fakeFrontendBoilerplateTask);
+      mockAnalysisDocumentRepo.findOne.mockResolvedValue(confirmedDoc);
+      mockS3Service.uploadGeneratedFile.mockResolvedValue(undefined);
+      mockTaskRepo.update.mockResolvedValue({});
+
+      // frontend boilerplate: generate_implementation_code 툴로 실제 프로젝트 파일 생성 (_env/ prefix 없음)
+      mockClaudeAgent.runAgentLoop.mockImplementation(async (options: any) => {
+        await options.onToolCall('generate_implementation_code', {
+          file_path: 'package.json',
+          code: '{"name":"frontend"}',
+        });
+        await options.onToolCall('generate_implementation_code', {
+          file_path: 'vite.config.ts',
+          code: 'export default {}',
+        });
+      });
+
+      await service.run('proj-1', 'task-fe-bp');
+
+      expect(mockS3Service.uploadGeneratedFile).toHaveBeenCalledTimes(2);
+      expect(mockS3Service.uploadGeneratedFile).toHaveBeenCalledWith('proj-1', 'package.json', '{"name":"frontend"}');
+      expect(mockS3Service.uploadGeneratedFile).toHaveBeenCalledWith('proj-1', 'vite.config.ts', 'export default {}');
+      expect(mockTaskRepo.update).toHaveBeenNthCalledWith(2, { id: 'task-fe-bp' }, { status: 'DONE' });
+    });
+
+    it('[frontend boilerplate] 파일이 하나도 생성되지 않으면 FAILED로 갱신한다', async () => {
+      mockTaskRepo.findOneOrFail.mockResolvedValue(fakeFrontendBoilerplateTask);
+      mockAnalysisDocumentRepo.findOne.mockResolvedValue(confirmedDoc);
+      mockTaskRepo.update.mockResolvedValue({});
+      // 툴 호출 없이 루프 종료
+      mockClaudeAgent.runAgentLoop.mockImplementation(async () => {});
+
+      await expect(service.run('proj-1', 'task-fe-bp')).rejects.toThrow('Boilerplate task generated no files');
+      expect(mockTaskRepo.update).toHaveBeenNthCalledWith(2, { id: 'task-fe-bp' }, { status: 'FAILED' });
+    });
+
     // ── Backend 정상 케이스 ────────────────────────────────────────────────────
 
-    it('docker 테스트 통과 시 S3에 업로드하고 DONE으로 갱신한다', async () => {
+    it('sandbox 없이 test + impl을 S3에 업로드하고 DONE으로 갱신한다', async () => {
       mockTaskRepo.findOneOrFail.mockResolvedValue(fakeTask);
       mockAnalysisDocumentRepo.findOne.mockResolvedValue(confirmedDoc);
       mockS3Service.uploadGeneratedFile.mockResolvedValue(undefined);
       mockTaskRepo.update.mockResolvedValue({});
       mockClaudeAgent.runAgentLoop.mockImplementation(simulateAgentLoop);
-      // env 파일 다운로드 없음 (Not found → 빈 배열)
-      mockDockerSandbox.runTest.mockResolvedValue({ passed: true, output: 'Tests: 1 passed' });
 
       await service.run('proj-1', 'task-1');
 
       expect(mockTaskRepo.update).toHaveBeenNthCalledWith(1, { id: 'task-1' }, { status: 'IN_PROGRESS' });
       expect(mockTaskRepo.update).toHaveBeenNthCalledWith(2, { id: 'task-1' }, { status: 'DONE' });
-      // runTest(envFiles, codeFiles) 시그니처 — 두 번째 인자가 [testFile, implFile]
-      expect(mockDockerSandbox.runTest).toHaveBeenCalledWith(
-        expect.any(Array),
-        expect.arrayContaining([
-          expect.objectContaining({ filePath: 'src/user/user.service.spec.ts' }),
-          expect.objectContaining({ filePath: 'src/user/user.service.ts' }),
-        ]),
-      );
-      // test + impl 2개 업로드
+      // test + impl 2개 업로드, sandbox 없음
       expect(mockS3Service.uploadGeneratedFile).toHaveBeenCalledTimes(2);
-    });
-
-    // ── Backend 재시도 케이스 ──────────────────────────────────────────────────
-
-    it('1회 실패 후 성공하면 DONE, impl 재생성 1회 호출', async () => {
-      mockTaskRepo.findOneOrFail.mockResolvedValue(fakeTask);
-      mockAnalysisDocumentRepo.findOne.mockResolvedValue(confirmedDoc);
-      mockS3Service.uploadGeneratedFile.mockResolvedValue(undefined);
-      mockTaskRepo.update.mockResolvedValue({});
-      mockClaudeAgent.runAgentLoop.mockImplementation(simulateAgentLoop);
-      mockClaudeAgent.runWithTool.mockResolvedValue(implRetryResult);
-
-      // 1회 실패 → 2회째 성공
-      mockDockerSandbox.runTest
-        .mockResolvedValueOnce({ passed: false, output: 'FAIL: expected 1, got 2' })
-        .mockResolvedValueOnce({ passed: true, output: 'Tests: 1 passed' });
-
-      await service.run('proj-1', 'task-1');
-
-      expect(mockClaudeAgent.runWithTool).toHaveBeenCalledTimes(1);
-      expect(mockDockerSandbox.runTest).toHaveBeenCalledTimes(2);
-      expect(mockTaskRepo.update).toHaveBeenNthCalledWith(2, { id: 'task-1' }, { status: 'DONE' });
-    });
-
-    it('3회 연속 실패하면 FAILED로 갱신하고 에러를 던진다', async () => {
-      mockTaskRepo.findOneOrFail.mockResolvedValue(fakeTask);
-      mockAnalysisDocumentRepo.findOne.mockResolvedValue(confirmedDoc);
-      mockTaskRepo.update.mockResolvedValue({});
-      mockClaudeAgent.runAgentLoop.mockImplementation(simulateAgentLoop);
-      mockClaudeAgent.runWithTool.mockResolvedValue(implRetryResult);
-
-      // 3회 모두 실패
-      mockDockerSandbox.runTest.mockResolvedValue({ passed: false, output: 'FAIL' });
-
-      await expect(service.run('proj-1', 'task-1')).rejects.toThrow(
-        'Phase 3 backend sandbox test failed after 3 retries',
+      expect(mockS3Service.uploadGeneratedFile).toHaveBeenCalledWith(
+        'proj-1', 'src/user/user.service.spec.ts', expect.any(String),
       );
-
-      // 3회 runTest + 2회 impl 재생성 (마지막 시도 후에는 재생성 없이 throw)
-      expect(mockDockerSandbox.runTest).toHaveBeenCalledTimes(3);
-      expect(mockClaudeAgent.runWithTool).toHaveBeenCalledTimes(2);
-      expect(mockTaskRepo.update).toHaveBeenNthCalledWith(2, { id: 'task-1' }, { status: 'FAILED' });
-      expect(mockS3Service.uploadGeneratedFile).not.toHaveBeenCalled();
+      expect(mockS3Service.uploadGeneratedFile).toHaveBeenCalledWith(
+        'proj-1', 'src/user/user.service.ts', expect.any(String),
+      );
     });
 
-    // ── Backend 기타 실패 케이스 ───────────────────────────────────────────────
+    // ── Backend 실패 케이스 ────────────────────────────────────────────────────
 
     it('실행 중 에러 발생 시 task를 FAILED로 갱신하고 에러를 전파한다', async () => {
       mockTaskRepo.findOneOrFail.mockResolvedValue(fakeTask);

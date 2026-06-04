@@ -12,11 +12,11 @@ import { TaskType } from '../entities/enums';
 // 테스트 환경에서는 실제 파일이 없을 수 있으므로 가짜 문자열을 반환하도록 교체
 jest.mock('fs');
 const mockReadFileSync = fs.readFileSync as jest.Mock;
-// static 필드(TOOL_TEST, TOOL_IMPL) 초기화 시점에도 호출되므로 모듈 로드 직후 기본값 설정
+// static 필드(TOOL_BACKEND_TEST, TOOL_BACKEND_IMPL 등) 초기화 시점에도 호출되므로 모듈 로드 직후 기본값 설정
 mockReadFileSync.mockReturnValue('mocked prompt');
 
-// ClaudeAgentService mock — backend: runAgentLoop, frontend: runWithTool
-const mockClaudeAgent = { runAgentLoop: jest.fn(), runWithTool: jest.fn() };
+// ClaudeAgentService mock — backend/frontend 모두 runAgentLoop 기반 TDD 루프 사용
+const mockClaudeAgent = { runAgentLoop: jest.fn() };
 
 // TypeORM Repository mock
 const mockTaskRepo = { findOneOrFail: jest.fn(), update: jest.fn() };
@@ -66,25 +66,28 @@ const confirmedDoc = {
   designSystem: null,
 };
 
-// Backend: generate_test_code → generate_implementation_code 루프 시뮬레이션
+// Backend: generate_backend_test_code → generate_backend_implementation_code 루프 시뮬레이션
 const simulateAgentLoop = async (options: any) => {
-  await options.onToolCall('generate_test_code', {
+  await options.onToolCall('generate_backend_test_code', {
     test_path: 'src/user/user.service.spec.ts',
     test_code: 'describe("UserService") { ... }',
   });
-  await options.onToolCall('generate_implementation_code', {
+  await options.onToolCall('generate_backend_implementation_code', {
     file_path: 'src/user/user.service.ts',
     code: 'export class UserService { ... }',
   });
 };
 
-// Frontend: runWithTool 반환값
-const frontendToolResult = {
-  toolName: 'generate_ui_component',
-  toolInput: {
+// Frontend: generate_frontend_test_code → generate_frontend_implementation_code 루프 시뮬레이션
+const simulateFrontendAgentLoop = async (options: any) => {
+  await options.onToolCall('generate_frontend_test_code', {
+    test_path: 'src/pages/LoginPage.test.tsx',
+    test_code: 'describe("LoginPage") { ... }',
+  });
+  await options.onToolCall('generate_frontend_implementation_code', {
     file_path: 'src/pages/LoginPage.tsx',
     code: 'export function LoginPage() { ... }',
-  },
+  });
 };
 
 const fakeFrontendTask = {
@@ -129,13 +132,13 @@ describe('Phase3Service', () => {
       mockS3Service.uploadGeneratedFile.mockResolvedValue(undefined);
       mockTaskRepo.update.mockResolvedValue({});
 
-      // boilerplate: generate_implementation_code 툴로 환경 파일 생성
+      // boilerplate: generate_backend_implementation_code 툴로 환경 파일 생성
       mockClaudeAgent.runAgentLoop.mockImplementation(async (options: any) => {
-        await options.onToolCall('generate_implementation_code', {
+        await options.onToolCall('generate_backend_implementation_code', {
           file_path: '_env/package.json',
           code: '{"name":"test"}',
         });
-        await options.onToolCall('generate_implementation_code', {
+        await options.onToolCall('generate_backend_implementation_code', {
           file_path: '_env/tsconfig.json',
           code: '{"compilerOptions":{}}',
         });
@@ -167,13 +170,13 @@ describe('Phase3Service', () => {
       mockS3Service.uploadGeneratedFile.mockResolvedValue(undefined);
       mockTaskRepo.update.mockResolvedValue({});
 
-      // frontend boilerplate: generate_implementation_code 툴로 실제 프로젝트 파일 생성 (_env/ prefix 없음)
+      // frontend boilerplate: generate_frontend_implementation_code 툴로 실제 프로젝트 파일 생성 (_env/ prefix 없음)
       mockClaudeAgent.runAgentLoop.mockImplementation(async (options: any) => {
-        await options.onToolCall('generate_implementation_code', {
+        await options.onToolCall('generate_frontend_implementation_code', {
           file_path: 'package.json',
           code: '{"name":"frontend"}',
         });
-        await options.onToolCall('generate_implementation_code', {
+        await options.onToolCall('generate_frontend_implementation_code', {
           file_path: 'vite.config.ts',
           code: 'export default {}',
         });
@@ -251,7 +254,7 @@ describe('Phase3Service', () => {
       mockTaskRepo.update.mockResolvedValue({});
       mockClaudeAgent.runAgentLoop.mockImplementation(async (options: any) => {
         // test 파일만 생성, impl 없음
-        await options.onToolCall('generate_test_code', {
+        await options.onToolCall('generate_backend_test_code', {
           test_path: 'src/user/user.service.spec.ts',
           test_code: 'describe("UserService") { ... }',
         });
@@ -262,24 +265,26 @@ describe('Phase3Service', () => {
       expect(mockTaskRepo.update).toHaveBeenNthCalledWith(2, { id: 'task-1' }, { status: 'FAILED' });
     });
 
-    // ── Frontend ───────────────────────────────────────────────────────────────
+    // ── Frontend (TDD) ───────────────────────────────────────────────────────────
 
-    it('[frontend] 컴포넌트를 생성하고 S3에 업로드한 뒤 task를 DONE으로 갱신한다', async () => {
+    it('[frontend] test + component 2파일을 S3에 업로드한 뒤 task를 DONE으로 갱신한다', async () => {
       mockTaskRepo.findOneOrFail.mockResolvedValue(fakeFrontendTask);
       mockAnalysisDocumentRepo.findOne.mockResolvedValue(confirmedDocWithDesignSystem);
       mockS3Service.uploadGeneratedFile.mockResolvedValue(undefined);
       mockTaskRepo.update.mockResolvedValue({});
-      mockClaudeAgent.runWithTool.mockResolvedValue(frontendToolResult);
+      mockClaudeAgent.runAgentLoop.mockImplementation(simulateFrontendAgentLoop);
 
       await service.run('proj-1', 'task-2');
 
-      expect(mockS3Service.uploadGeneratedFile).toHaveBeenCalledTimes(1);
+      // test + component 2개 업로드, sandbox 없음
+      expect(mockS3Service.uploadGeneratedFile).toHaveBeenCalledTimes(2);
       expect(mockS3Service.uploadGeneratedFile).toHaveBeenCalledWith(
-        'proj-1',
-        'src/pages/LoginPage.tsx',
-        'export function LoginPage() { ... }',
+        'proj-1', 'src/pages/LoginPage.test.tsx', expect.any(String),
       );
-      expect(mockTaskRepo.update).toHaveBeenCalledWith({ id: 'task-2' }, { status: 'DONE' });
+      expect(mockS3Service.uploadGeneratedFile).toHaveBeenCalledWith(
+        'proj-1', 'src/pages/LoginPage.tsx', expect.any(String),
+      );
+      expect(mockTaskRepo.update).toHaveBeenNthCalledWith(2, { id: 'task-2' }, { status: 'DONE' });
     });
 
     it('[frontend] designSystem이 있으면 userContent에 포함해서 Claude에 전달한다', async () => {
@@ -287,11 +292,11 @@ describe('Phase3Service', () => {
       mockAnalysisDocumentRepo.findOne.mockResolvedValue(confirmedDocWithDesignSystem);
       mockS3Service.uploadGeneratedFile.mockResolvedValue(undefined);
       mockTaskRepo.update.mockResolvedValue({});
-      mockClaudeAgent.runWithTool.mockResolvedValue(frontendToolResult);
+      mockClaudeAgent.runAgentLoop.mockImplementation(simulateFrontendAgentLoop);
 
       await service.run('proj-1', 'task-2');
 
-      const callArgs = mockClaudeAgent.runWithTool.mock.calls[0][0];
+      const callArgs = mockClaudeAgent.runAgentLoop.mock.calls[0][0];
       expect(callArgs.messages[0].content).toContain('## Design System');
       expect(callArgs.messages[0].content).toContain('#6366F1');
     });
@@ -301,20 +306,54 @@ describe('Phase3Service', () => {
       mockAnalysisDocumentRepo.findOne.mockResolvedValue(confirmedDoc);
       mockS3Service.uploadGeneratedFile.mockResolvedValue(undefined);
       mockTaskRepo.update.mockResolvedValue({});
-      mockClaudeAgent.runWithTool.mockResolvedValue(frontendToolResult);
+      mockClaudeAgent.runAgentLoop.mockImplementation(simulateFrontendAgentLoop);
 
       await service.run('proj-1', 'task-2');
 
-      const callArgs = mockClaudeAgent.runWithTool.mock.calls[0][0];
+      const callArgs = mockClaudeAgent.runAgentLoop.mock.calls[0][0];
       expect(callArgs.messages[0].content).not.toContain('## Design System');
-      expect(mockS3Service.uploadGeneratedFile).toHaveBeenCalledTimes(1);
+      expect(mockS3Service.uploadGeneratedFile).toHaveBeenCalledTimes(2);
     });
 
-    it('[frontend] runWithTool 실패 시 FAILED로 갱신하고 S3 업로드를 하지 않는다', async () => {
+    it('[frontend] test만 생성되고 component가 없으면 incomplete 에러 + FAILED로 갱신한다', async () => {
       mockTaskRepo.findOneOrFail.mockResolvedValue(fakeFrontendTask);
       mockAnalysisDocumentRepo.findOne.mockResolvedValue(confirmedDoc);
       mockTaskRepo.update.mockResolvedValue({});
-      mockClaudeAgent.runWithTool.mockRejectedValue(new Error('CLAUDE_API_ERROR'));
+      mockClaudeAgent.runAgentLoop.mockImplementation(async (options: any) => {
+        // test 파일만 생성, component 없음
+        await options.onToolCall('generate_frontend_test_code', {
+          test_path: 'src/pages/LoginPage.test.tsx',
+          test_code: 'describe("LoginPage") { ... }',
+        });
+      });
+
+      await expect(service.run('proj-1', 'task-2')).rejects.toThrow('Phase 3 frontend incomplete');
+      expect(mockS3Service.uploadGeneratedFile).not.toHaveBeenCalled();
+      expect(mockTaskRepo.update).toHaveBeenNthCalledWith(2, { id: 'task-2' }, { status: 'FAILED' });
+    });
+
+    it('[frontend] component만 생성되고 test가 없으면 incomplete 에러 + FAILED로 갱신한다', async () => {
+      mockTaskRepo.findOneOrFail.mockResolvedValue(fakeFrontendTask);
+      mockAnalysisDocumentRepo.findOne.mockResolvedValue(confirmedDoc);
+      mockTaskRepo.update.mockResolvedValue({});
+      mockClaudeAgent.runAgentLoop.mockImplementation(async (options: any) => {
+        // component 파일만 생성, test 없음
+        await options.onToolCall('generate_frontend_implementation_code', {
+          file_path: 'src/pages/LoginPage.tsx',
+          code: 'export function LoginPage() { ... }',
+        });
+      });
+
+      await expect(service.run('proj-1', 'task-2')).rejects.toThrow('Phase 3 frontend incomplete');
+      expect(mockS3Service.uploadGeneratedFile).not.toHaveBeenCalled();
+      expect(mockTaskRepo.update).toHaveBeenNthCalledWith(2, { id: 'task-2' }, { status: 'FAILED' });
+    });
+
+    it('[frontend] runAgentLoop 실패 시 FAILED로 갱신하고 S3 업로드를 하지 않는다', async () => {
+      mockTaskRepo.findOneOrFail.mockResolvedValue(fakeFrontendTask);
+      mockAnalysisDocumentRepo.findOne.mockResolvedValue(confirmedDoc);
+      mockTaskRepo.update.mockResolvedValue({});
+      mockClaudeAgent.runAgentLoop.mockRejectedValue(new Error('CLAUDE_API_ERROR'));
 
       await expect(service.run('proj-1', 'task-2')).rejects.toThrow('CLAUDE_API_ERROR');
       expect(mockS3Service.uploadGeneratedFile).not.toHaveBeenCalled();

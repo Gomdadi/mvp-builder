@@ -27,9 +27,9 @@ export class Phase3Service {
 
   // ── Backend 툴 (TDD) ──────────────────────────────────────────────────────
 
-  private static readonly TOOL_TEST: Anthropic.Tool = {
-    name: 'generate_test_code',
-    description: Phase3Service.loadPrompt('phase3-tool-test.md'),
+  private static readonly TOOL_BACKEND_TEST: Anthropic.Tool = {
+    name: 'generate_backend_test_code',
+    description: Phase3Service.loadPrompt('phase3-tool-backend-test.md'),
     input_schema: {
       type: 'object',
       properties: {
@@ -46,9 +46,9 @@ export class Phase3Service {
     },
   };
 
-  private static readonly TOOL_IMPL: Anthropic.Tool = {
-    name: 'generate_implementation_code',
-    description: Phase3Service.loadPrompt('phase3-tool-impl.md'),
+  private static readonly TOOL_BACKEND_IMPL: Anthropic.Tool = {
+    name: 'generate_backend_implementation_code',
+    description: Phase3Service.loadPrompt('phase3-tool-backend-impl.md'),
     input_schema: {
       type: 'object',
       properties: {
@@ -66,21 +66,40 @@ export class Phase3Service {
   };
 
   private static readonly BACKEND_TOOLS: Anthropic.Tool[] = [
-    Phase3Service.TOOL_TEST,
-    Phase3Service.TOOL_IMPL,
+    Phase3Service.TOOL_BACKEND_TEST,
+    Phase3Service.TOOL_BACKEND_IMPL,
   ];
 
-  // ── Frontend 툴 ───────────────────────────────────────────────────────────
+  // ── Frontend 툴 (TDD) ─────────────────────────────────────────────────────
 
-  private static readonly TOOL_UI_COMPONENT: Anthropic.Tool = {
-    name: 'generate_ui_component',
-    description: Phase3Service.loadPrompt('phase3-tool-ui-component.md'),
+  private static readonly TOOL_FRONTEND_TEST: Anthropic.Tool = {
+    name: 'generate_frontend_test_code',
+    description: Phase3Service.loadPrompt('phase3-tool-frontend-test.md'),
+    input_schema: {
+      type: 'object',
+      properties: {
+        test_path: {
+          type: 'string',
+          description: 'Relative path of the test file from the project root (e.g., src/components/LoginForm.test.tsx)',
+        },
+        test_code: {
+          type: 'string',
+          description: 'Complete, runnable component test file content',
+        },
+      },
+      required: ['test_path', 'test_code'],
+    },
+  };
+
+  private static readonly TOOL_FRONTEND_IMPL: Anthropic.Tool = {
+    name: 'generate_frontend_implementation_code',
+    description: Phase3Service.loadPrompt('phase3-tool-frontend-impl.md'),
     input_schema: {
       type: 'object',
       properties: {
         file_path: {
           type: 'string',
-          description: 'Relative path of the component file (e.g., src/pages/LoginPage.tsx)',
+          description: 'Relative path of the component file (e.g., src/components/LoginForm.tsx)',
         },
         code: {
           type: 'string',
@@ -92,7 +111,8 @@ export class Phase3Service {
   };
 
   private static readonly FRONTEND_TOOLS: Anthropic.Tool[] = [
-    Phase3Service.TOOL_UI_COMPONENT,
+    Phase3Service.TOOL_FRONTEND_TEST,
+    Phase3Service.TOOL_FRONTEND_IMPL,
   ];
 
   private static loadPrompt(filename: string): string {
@@ -143,7 +163,7 @@ export class Phase3Service {
   }
 
   // 백엔드 보일러플레이트 태스크 실행.
-  // generate_implementation_code 툴을 반복 호출해 _env/ prefix 테스트 환경 파일들을 생성하고 S3에 저장한다.
+  // generate_backend_implementation_code 툴을 반복 호출해 _env/ prefix 테스트 환경 파일들을 생성하고 S3에 저장한다.
   private async runBackendBoilerplate(
     task: { id: string; name: string; description: string },
     doc: { directoryStructure: Record<string, unknown>[] },
@@ -166,10 +186,10 @@ export class Phase3Service {
     await this.claudeAgent.runAgentLoop({
       system: this.backendBoilerplateSystemPrompt,
       messages: [{ role: 'user', content: userContent }],
-      // TOOL_IMPL만 허용 — _env/ 하위 환경 파일만 생성
-      tools: [Phase3Service.TOOL_IMPL],
+      // TOOL_BACKEND_IMPL만 허용 — _env/ 하위 환경 파일만 생성
+      tools: [Phase3Service.TOOL_BACKEND_IMPL],
       onToolCall: (toolName, toolInput) => {
-        if (toolName === 'generate_implementation_code') {
+        if (toolName === 'generate_backend_implementation_code') {
           const input = toolInput as { file_path: string; code: string };
           generated.push({ filePath: input.file_path, code: input.code });
           return 'File accepted. Continue with remaining boilerplate files.';
@@ -188,7 +208,7 @@ export class Phase3Service {
   }
 
   // 프론트엔드 보일러플레이트 태스크 실행.
-  // generate_implementation_code 툴을 반복 호출해 실제 프로젝트 기반 파일들(package.json, vite.config.ts 등)을
+  // generate_frontend_implementation_code 툴을 반복 호출해 실제 프로젝트 기반 파일들(package.json, vite.config.ts 등)을
   // 생성하고 S3에 저장한다. 백엔드 보일러플레이트와 달리 _env/ prefix를 쓰지 않고 실제 파일 경로를 사용한다.
   private async runFrontendBoilerplate(
     task: { id: string; name: string; description: string },
@@ -212,10 +232,10 @@ export class Phase3Service {
     await this.claudeAgent.runAgentLoop({
       system: this.frontendBoilerplateSystemPrompt,
       messages: [{ role: 'user', content: userContent }],
-      // TOOL_IMPL만 허용 — 프론트엔드 기반 파일만 생성
-      tools: [Phase3Service.TOOL_IMPL],
+      // TOOL_FRONTEND_IMPL만 허용 — 프론트엔드 기반 파일만 생성
+      tools: [Phase3Service.TOOL_FRONTEND_IMPL],
       onToolCall: (toolName, toolInput) => {
-        if (toolName === 'generate_implementation_code') {
+        if (toolName === 'generate_frontend_implementation_code') {
           const input = toolInput as { file_path: string; code: string };
           generated.push({ filePath: input.file_path, code: input.code });
           return 'File accepted. Continue with remaining boilerplate files.';
@@ -259,12 +279,12 @@ export class Phase3Service {
       messages: [{ role: 'user', content: userContent }],
       tools: Phase3Service.BACKEND_TOOLS,
       onToolCall: (toolName, toolInput) => {
-        if (toolName === 'generate_test_code') {
+        if (toolName === 'generate_backend_test_code') {
           const input = toolInput as { test_path: string; test_code: string };
           testFile = { filePath: input.test_path, code: input.test_code };
           return 'Test code accepted. Now generate the implementation that makes these tests pass.';
         }
-        if (toolName === 'generate_implementation_code') {
+        if (toolName === 'generate_backend_implementation_code') {
           const input = toolInput as { file_path: string; code: string };
           implFile = { filePath: input.file_path, code: input.code };
           return 'Implementation code accepted.';
@@ -283,6 +303,9 @@ export class Phase3Service {
     this.logger.log(`Phase 3 backend complete — taskId=${taskId}`);
   }
 
+  // 프론트엔드 컴포넌트 태스크를 TDD 방식으로 실행.
+  // generate_frontend_test_code(테스트) → generate_frontend_implementation_code(컴포넌트) 순서로
+  // 두 파일을 생성하고, 둘 다 생성되었는지 검증한 뒤 S3에 업로드한다.
   private async runFrontend(
     task: { id: string; name: string; description: string },
     doc: { directoryStructure: Record<string, unknown>[]; designSystem: string | null },
@@ -304,17 +327,37 @@ export class Phase3Service {
       .filter((line) => line !== null)
       .join('\n');
 
-    const { toolInput } = await this.claudeAgent.runWithTool({
+    // test/component 파일을 추적 — 두 파일 모두 생성되었는지 검증하기 위함
+    let testFile: GeneratedFile | null = null;
+    let componentFile: GeneratedFile | null = null;
+
+    await this.claudeAgent.runAgentLoop({
       system: this.frontendSystemPrompt,
       messages: [{ role: 'user', content: userContent }],
       tools: Phase3Service.FRONTEND_TOOLS,
+      onToolCall: (toolName, toolInput) => {
+        if (toolName === 'generate_frontend_test_code') {
+          const input = toolInput as { test_path: string; test_code: string };
+          testFile = { filePath: input.test_path, code: input.test_code };
+          return 'Test code accepted. Now generate the component that makes these tests pass.';
+        }
+        if (toolName === 'generate_frontend_implementation_code') {
+          const input = toolInput as { file_path: string; code: string };
+          componentFile = { filePath: input.file_path, code: input.code };
+          return 'Component code accepted.';
+        }
+        this.logger.warn(`Unknown tool called: ${toolName}`);
+        return 'Unknown tool.';
+      },
     });
 
-    const input = toolInput as { file_path: string; code: string };
-    const generated: GeneratedFile[] = [{ filePath: input.file_path, code: input.code }];
+    if (!testFile || !componentFile) {
+      throw new Error(`Phase 3 frontend incomplete — only ${[testFile, componentFile].filter(Boolean).length}/2 files generated for task ${taskId}`);
+    }
 
-    await this.uploadAndComplete(projectId, taskId, generated);
-    this.logger.log(`Phase 3 frontend complete — taskId=${taskId} files=${generated.length}`);
+    // sandbox 없이 바로 S3 업로드 — 종합 검증은 Phase 4가 담당
+    await this.uploadAndComplete(projectId, taskId, [testFile, componentFile]);
+    this.logger.log(`Phase 3 frontend complete — taskId=${taskId}`);
   }
 
   private async uploadAndComplete(

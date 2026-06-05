@@ -622,7 +622,7 @@ img { border: none !important; outline: none !important; box-shadow: none !impor
                     <li><strong>비동기 큐 처리:</strong> BullMQ worker에서 Phase 1→2→3→4 순서 보장 + SSE 실시간 스트리밍을 Redis pub/sub으로 분리 — 워커 재시작 시 중복 실행 방지</li>
                     <li><strong>테스트 루프 설계:</strong> per-task sandbox(3회) → 종합 sandbox(10회)의 이중 루프 — 실패 시 Claude에게 적절한 에러 컨텍스트를 전달하는 포맷 설계</li>
                     <li><strong>Docker 샌드박스 도입:</strong> 서버 실행 환경에서 격리된 테스팅 환경을 구축하기 위해 <code>dockerode-compose</code>로 컨테이너를 직접 띄워 Docker 샌드박스 환경 구축</li>
-                    <li><strong>크로스 태스크 의존성:</strong> Phase 3 per-task는 이전 파일 없이 실행돼 import 오류 발생 가능 — Phase 4에서 전체 파일 모아 재검증</li>
+                    <li><strong>크로스 태스크 의존성:</strong> Phase 3 per-task는 이전 파일 없이 실행돼 import 오류 발생 가능 — Phase 4에서 전체 파일 모아 재검증<br><span style="font-size:13px;color:var(--text-muted);padding-left:4px;">sandbox failed → debug loop 시도 → forward dep 판정 → 스킵 후 Task complete</span></li>
                 </ul>
             </div>
         </div>
@@ -694,7 +694,8 @@ img { border: none !important; outline: none !important; box-shadow: none !impor
                     <li>지원 기술 스택 범위가 한정적 — 검증된 스택 외 안정성 보장 어려움</li>
                     <li>복잡한 비즈니스 로직의 생성 코드 품질 보장 어려움</li>
                     <li>Docker 이미지 pull 시간으로 인한 파이프라인 전체 지연</li>
-                    <li>생성 코드의 보안 취약점 자동 검사 미비</li>
+                    <li><strong>토큰 비용:</strong> Phase별 컨텍스트 주입으로 인한 높은 API 사용 비용</li>
+                    <li><strong>생성 시간:</strong> 코드 생성 + sandbox 검증 + debug loop로 인한 전체 파이프라인 소요 시간 증가</li>
                 </ul>
             </div>
             <div>
@@ -703,7 +704,8 @@ img { border: none !important; outline: none !important; box-shadow: none !impor
                     <li>더 많은 기술 스택 프리셋 지원 (Spring Boot, Django, Ruby on Rails 등)</li>
                     <li>코드 품질 자동 리뷰 단계 추가 (정적 분석·보안 스캔)</li>
                     <li>Docker 이미지 캐싱으로 파이프라인 속도 개선</li>
-                    <li>사용자 실시간 피드백 루프 강화 — 생성 중 수정 요청 가능</li>
+                    <li><strong>토큰 비용 절감:</strong> 컨텍스트 압축·프롬프트 캐싱으로 API 사용량 최적화</li>
+                    <li><strong>생성 시간 단축:</strong> 독립 태스크 병렬 처리로 파이프라인 전체 시간 단축</li>
                 </ul>
             </div>
         </div>

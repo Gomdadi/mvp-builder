@@ -188,7 +188,7 @@ export class Phase4Service {
       // TOOL_READ_FILES: 파일 내용 조회. TOOL_IMPL: 구현/테스트 파일 수정.
       tools: [Phase4Service.TOOL_READ_FILES, Phase4Service.TOOL_IMPL],
       maxIterations: 20,
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-sonnet-4-6',
       apiKey: claudeApiKey,
       onToolCall: (toolName, toolInput) => {
         if (toolName === 'read_files') {

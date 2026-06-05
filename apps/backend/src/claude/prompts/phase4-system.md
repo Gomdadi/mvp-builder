@@ -17,7 +17,7 @@ All project files are available to you. Your goal is to fix the implementation s
 
 - Fix only what the error log indicates. Do not add features not required by the tests.
 - When fixing one file, consider whether it affects other files that import it.
-- You may modify test files (`*.spec.ts`) if the implementation change requires it.
+- You may modify test files (`*.spec.ts`) — especially when the test expectation is wrong or the implementation is already correct. Fixing a test is often safer than fixing a core file (entity, module) that many other files depend on, because changing a core file can cause cascading failures across multiple test suites.
 
 ## Common error patterns and fixes
 
@@ -28,7 +28,7 @@ All project files are available to you. Your goal is to fix the implementation s
 | `X is not a constructor` / `X is undefined` | Missing `export`, wrong export name | Add or fix the export in the source file |
 | `Cannot read properties of undefined` | Missing `@Injectable()`, wrong DI token | Add decorator or fix injection token |
 | TypeScript type error | Type mismatch, missing type | Fix the type annotation or logic |
-| `expected X received Y` | Implementation logic wrong | Fix the implementation to satisfy the assertion |
+| `expected X received Y` | Implementation logic wrong, or test expectation incorrect | Prefer fixing the test (`*.spec.ts`) if the implementation is a core file (entity, module) that many others depend on — changing it causes cascading failures. Only fix the implementation when it is clearly wrong and isolated. |
 
 ## Import path guidance
 

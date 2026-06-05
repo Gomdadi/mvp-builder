@@ -43,7 +43,12 @@ export class DockerSandboxService {
     try {
       await this.writeFiles(tmpDir, envFiles, codeFiles);
 
+      // docker-compose.yml의 volumes 상대 경로(.)를 tmpDir 절대 경로로 교체.
+      // 백엔드가 도커 컨테이너 안에서 실행될 때 volumes의 '.'는 컨테이너 내부 경로이므로
+      // 호스트 도커 데몬이 마운트할 수 없음 → 절대 경로로 명시해야 정확히 마운트됨.
       const composeFilePath = path.join(tmpDir, 'docker-compose.yml');
+      const composeRaw = await fs.readFile(composeFilePath, 'utf-8');
+      await fs.writeFile(composeFilePath, composeRaw.replace(/- \.:\/app/g, `- ${tmpDir}:/app`));
       compose = new DockerodeCompose(this.docker, composeFilePath, projectName);
 
       // image가 로컬에 없으면 pull — 이미 있으면 빠르게 완료

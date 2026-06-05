@@ -24,13 +24,15 @@ services:
       - /app/node_modules
       # dockerode가 호스트 Docker 데몬에 접근하기 위해 소켓 마운트
       - /var/run/docker.sock:/var/run/docker.sock
+      # sandbox tmpDir을 호스트와 공유 — Docker-in-Docker volume 마운트 경로 일치
+      - /tmp:/tmp
     env_file:
       - ./apps/backend/.env
     environment:
       DATABASE_URL: postgresql://postgres:password@postgres:5432/mvp_builder
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      S3_ENDPOINT: http://localstack:4566
+      AWS_ENDPOINT: http://localstack:4566
     depends_on:
       - postgres
       - redis
